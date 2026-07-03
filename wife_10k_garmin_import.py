@@ -25,6 +25,8 @@
   python wife_10k_garmin_import.py --dry-run     # печать примеров, без отправки
   python wife_10k_garmin_import.py --test        # только НЕДЕЛЯ 1
   python wife_10k_garmin_import.py --clear       # удалить ранее созданные ([W10K]) и выйти
+  python wife_10k_garmin_import.py --clear-past  # удалить только уже прошедшие (дата < сегодня)
+  python wife_10k_garmin_import.py --clear-past --before 2026-07-01   # прошедшие до указанной даты
   python wife_10k_garmin_import.py               # весь план (рекомендуется сначала --clear)
 
 Зоны (ПАНО 184): Z1 восстановление | Z2 лёгкий/длинный | Z4 порог | Z5 МПК/темп 10к.
@@ -312,6 +314,10 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--test", action="store_true", help="только неделя 1")
     ap.add_argument("--clear", action="store_true")
+    ap.add_argument("--clear-past", action="store_true",
+                    help="удалить только тренировки с датой раньше сегодняшней")
+    ap.add_argument("--before", metavar="ГГГГ-ММ-ДД",
+                    help="граничная дата для --clear-past (по умолчанию сегодня)")
     args=ap.parse_args()
 
     if args.dry_run:
@@ -329,6 +335,12 @@ def main():
         print("JSON (Интервалы):"); print(json.dumps(sr, ensure_ascii=False, indent=1)[:900], "...")
         return
 
+    if args.clear_past:
+        try:
+            cutoff = datetime.date.fromisoformat(args.before) if args.before else datetime.date.today()
+        except ValueError:
+            sys.exit(f"Неверная дата в --before: {args.before} (нужен формат ГГГГ-ММ-ДД)")
+
     garth=connect()
     def post(p, body): return garth.connectapi(p, method="POST", json=body)
     def get(p):        return garth.connectapi(p)
@@ -343,6 +355,27 @@ def main():
             except Exception as e: print("  FAIL удаления:", w.get("workoutName"), e)
             time.sleep(0.2)
         print("Очистка завершена."); return
+
+    if args.clear_past:
+        # дата каждой тренировки восстанавливается из плана по имени (имя уникально: тег+неделя+день+название)
+        plan_dates = {name[:79]: d for d, name, _ in build_all()}
+        lst=get("/workout-service/workouts?start=0&limit=999") or []
+        mine=[w for w in lst if str(w.get("workoutName","")).startswith(TAG)]
+        past=[]; unknown=[]
+        for w in mine:
+            d=plan_dates.get(w.get("workoutName"))
+            if d is None: unknown.append(w)
+            elif d < cutoff: past.append((d, w))
+        past.sort(key=lambda x: x[0])
+        print(f"Найдено наших: {len(mine)}; прошедших (до {cutoff.isoformat()}): {len(past)}")
+        if unknown:
+            print(f"Пропущено (нет в текущем плане, дату не определить): {len(unknown)}")
+            for w in unknown: print("  ?", w.get("workoutName"))
+        for d, w in past:
+            try: delete(f"/workout-service/workout/{w['workoutId']}"); print(f"  удалено: {d.isoformat()}  {w['workoutName']}")
+            except Exception as e: print(f"  FAIL удаления: {d.isoformat()}  {w.get('workoutName')} -> {e}")
+            time.sleep(0.2)
+        print("Очистка прошедших завершена."); return
 
     items=build_all(only_week=0 if args.test else None)
     runs=sum(1 for _,_,w in items if w["sportType"]["sportTypeKey"]=="running")
