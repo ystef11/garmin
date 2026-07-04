@@ -22,9 +22,14 @@
 АВТОРИЗАЦИЯ (PowerShell):
   $env:GARMIN_EMAIL="you@mail.com"
   $env:GARMIN_PASSWORD="********"
-  При 2FA скрипт спросит код; токен ляжет в C:/Users/<ты>/.garth.
+  При 2FA скрипт спросит код. Токен сохраняется ПО-УЧЁТОЧНО:
+  C:/Users/<ты>/.garth/<логин garmin>/ — можно держать несколько аккаунтов.
+  Выбор учётки: --account you@mail.com (или через GARMIN_EMAIL).
+  Если сохранена ровно одна учётка — подхватится сама.
+  Старый токен прямо в C:/Users/<ты>/.garth тоже распознаётся.
 
 ЗАПУСК
+  python garmin_plan_import.py plan.json --account you@mail.com --dry-run
   python garmin_plan_import.py plan.json --dry-run     # печать примеров, без отправки
   python garmin_plan_import.py plan.json --test        # только первая неделя (7 дней от первой даты)
   python garmin_plan_import.py plan.json --clear       # удалить все с тегом из meta.tag и выйти
@@ -35,7 +40,28 @@
 
 import os, sys, json, time, datetime, argparse
 
-TOKENS = os.path.expanduser("~/.garth")
+TOKENS_BASE = os.path.expanduser("~/.garth")
+
+def _has_tokens(d):
+    return os.path.isdir(d) and any(f.startswith("oauth") for f in os.listdir(d))
+
+def saved_accounts():
+    if not os.path.isdir(TOKENS_BASE): return []
+    return sorted(a for a in os.listdir(TOKENS_BASE) if _has_tokens(os.path.join(TOKENS_BASE, a)))
+
+def pick_account(cli_account):
+    """логин garmin: --account > GARMIN_EMAIL > единственная сохранённая учётка > legacy ~/.garth"""
+    acct = cli_account or os.environ.get("GARMIN_EMAIL")
+    if acct: return acct.strip().lower(), os.path.join(TOKENS_BASE, acct.strip().lower())
+    accs = saved_accounts()
+    if len(accs) == 1:
+        return accs[0], os.path.join(TOKENS_BASE, accs[0])
+    if len(accs) > 1:
+        sys.exit("Сохранено несколько учёток Garmin:\n  " + "\n  ".join(accs) +
+                 "\nУкажи, какую использовать: --account <логин> (или GARMIN_EMAIL).")
+    if _has_tokens(TOKENS_BASE):  # старое расположение
+        return None, TOKENS_BASE
+    return None, None
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
@@ -137,18 +163,29 @@ def load_plan(path):
     items.sort(key=lambda x: x[0])
     return tag, items, plan.get("meta", {})
 
-def connect():
+def connect(cli_account=None):
     import garth
     garth.client.sess.headers.update({"User-Agent": UA})
-    try:
-        garth.resume(TOKENS); _ = garth.client.username
-        print("Вход по сохранённому токену.")
-    except Exception:
-        email = os.environ.get("GARMIN_EMAIL"); pwd = os.environ.get("GARMIN_PASSWORD")
-        if not email or not pwd: sys.exit("Нет токена. Задай GARMIN_EMAIL и GARMIN_PASSWORD.")
-        garth.client.sess.headers.update({"User-Agent": UA})
-        garth.login(email, pwd, prompt_mfa=lambda: input("Код 2FA: ").strip())
-        garth.save(TOKENS); print("Токен сохранён в", TOKENS)
+    acct, tdir = pick_account(cli_account)
+    if tdir and _has_tokens(tdir):
+        try:
+            garth.resume(tdir); _ = garth.client.username
+            print(f"Вход по сохранённому токену: {acct or 'legacy ~/.garth'}")
+            garth.client.sess.headers.update({"User-Agent": UA})
+            return garth
+        except Exception as e:
+            print(f"Токен {tdir} не подошёл ({e}) — пробую войти заново.")
+    email = (cli_account or os.environ.get("GARMIN_EMAIL") or acct)
+    pwd = os.environ.get("GARMIN_PASSWORD")
+    if not email or not pwd:
+        sys.exit("Нет валидного токена. Задай GARMIN_EMAIL и GARMIN_PASSWORD "
+                 "(и/или --account <логин>).")
+    email = email.strip().lower()
+    garth.client.sess.headers.update({"User-Agent": UA})
+    garth.login(email, pwd, prompt_mfa=lambda: input("Код 2FA: ").strip())
+    save_dir = os.path.join(TOKENS_BASE, email)
+    os.makedirs(save_dir, exist_ok=True)
+    garth.save(save_dir); print("Токен сохранён в", save_dir)
     garth.client.sess.headers.update({"User-Agent": UA})
     return garth
 
@@ -162,6 +199,8 @@ def main():
                     help="удалить только тренировки с датой раньше сегодняшней")
     ap.add_argument("--before", metavar="ГГГГ-ММ-ДД",
                     help="граничная дата для --clear-past (по умолчанию сегодня)")
+    ap.add_argument("--account", metavar="ЛОГИН",
+                    help="логин Garmin: токен берётся/кладётся в ~/.garth/<логин>")
     args = ap.parse_args()
 
     tag, items, meta = load_plan(args.plan)
@@ -191,7 +230,7 @@ def main():
               json.dumps(last, ensure_ascii=False, indent=1)[:800], "...")
         return
 
-    garth = connect()
+    garth = connect(args.account)
     def post(p, body): return garth.connectapi(p, method="POST", json=body)
     def get(p):        return garth.connectapi(p)
     def delete(p):     return garth.connectapi(p, method="DELETE")
