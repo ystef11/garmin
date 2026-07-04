@@ -16,6 +16,7 @@
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;}
   .wrap{max-width:1000px;margin:0 auto;padding:32px 20px 80px;}
   .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;}
+
   .topbar{position:sticky;top:0;z-index:30;background:rgba(245,244,240,.93);backdrop-filter:blur(6px);
     -webkit-backdrop-filter:blur(6px);padding:10px 0;margin:-8px 0 8px;border-bottom:1px solid var(--line);}
   .jumpbtn{appearance:none;border:none;cursor:pointer;background:var(--accent);color:#fff;font-weight:700;
@@ -23,11 +24,13 @@
   .jumpbtn:hover{transform:translateY(-1px);}
   .jumpbtn:active{transform:translateY(0);}
   .jumpbtn.disabled{background:var(--z-rest);cursor:default;box-shadow:none;}
+
   tr.today td{background:#fdeee9 !important;}
   td.day.today{color:var(--accent);box-shadow:inset 4px 0 0 var(--accent);}
   .todaytag{display:inline-block;margin-top:3px;font-size:9px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
     background:var(--accent);color:#fff;border-radius:3px;padding:1px 5px;}
   .week.hastoday{box-shadow:0 0 0 2px var(--accent);}
+
   header{border-bottom:3px solid var(--ink);padding-bottom:22px;margin-bottom:30px;}
   .eyebrow{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);font-weight:700;}
   h1{font-size:clamp(30px,6vw,52px);line-height:.98;margin:8px 0 4px;font-weight:800;letter-spacing:-.02em;}
@@ -38,15 +41,22 @@
   .fact .k{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);}
   .fact .v{font-size:18px;font-weight:700;margin-top:2px;}
   .fact .v small{font-weight:500;color:var(--muted);font-size:13px;}
+
   h2{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink);
      border-bottom:1px solid var(--ink);padding-bottom:7px;margin:42px 0 16px;font-weight:800;}
   .h2note{font-size:12.5px;color:var(--muted);margin:-8px 0 16px;}
+
   .zones{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;}
-  .zone{background:var(--card);border:1px solid var(--line);padding:9px 12px;border-radius:3px;display:flex;gap:10px;}
-  .zone i{display:inline-block;width:10px;flex:none;border-radius:2px;}
-  .zone .zn{font-weight:700;font-size:13px;}
-  .zone .zp{font-size:13px;}
-  .zone .zh{font-size:12px;font-weight:700;color:#374151;}
+  .zone{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--zc);padding:9px 12px;border-radius:3px;}
+  .zone .name{font-weight:700;font-size:13px;}
+  .zone .pace{font-size:13px;}
+  .zone .hr{font-size:13px;font-weight:700;}
+  .zone .note{font-size:11.5px;color:var(--muted);}
+
+  .analysis{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--z-long);border-radius:4px;padding:16px 20px;}
+  .analysis p{margin:7px 0;font-size:13.5px;}
+  .analysis b{color:var(--ink);}
+
   .vchart{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:18px 16px 12px;}
   .bars{display:flex;align-items:flex-end;gap:5px;height:160px;}
   .barcol{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;}
@@ -58,12 +68,15 @@
   .barcol .wk{font-size:10px;color:var(--muted);margin-top:5px;}
   .vlegend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:14px;}
   .vlegend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:5px;vertical-align:-1px;}
+
   .strgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
   .strcard{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:16px 18px;}
   .strcard h3{margin:0 0 2px;font-size:16px;}
   .strcard .when{font-size:12px;color:var(--accent);font-weight:700;letter-spacing:.04em;text-transform:uppercase;}
   .strcard ul{margin:12px 0 10px;padding-left:18px;}
   .strcard li{margin:5px 0;font-size:13.5px;}
+  .strcard .prog{font-size:12.5px;color:var(--muted);border-top:1px dashed var(--line);padding-top:9px;}
+
   .week{background:var(--card);border:1px solid var(--line);border-radius:5px;margin-bottom:16px;overflow:hidden;}
   .week.down{background:#faf7f0;}
   .whead{display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
@@ -82,7 +95,10 @@
   .vol{text-align:right;}
   .vol .num{font-family:ui-monospace,monospace;font-size:19px;font-weight:800;}
   .vol .num small{font-size:12px;font-weight:600;color:var(--muted);}
+  .kmref{color:var(--muted);font-size:12px;font-family:ui-monospace,monospace;}
+  .fuel{color:#0f8a6e;font-size:12px;font-weight:700;white-space:nowrap;}
   .vol .lbl{font-size:10px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;}
+
   table{width:100%;border-collapse:collapse;table-layout:fixed;}
   td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top;font-size:13.5px;}
   tr:last-child td{border-bottom:none;}
@@ -93,14 +109,19 @@
   .chip{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
         padding:3px 8px;border-radius:3px;color:#fff;}
   .ses b{color:var(--accent);}
+  .tt{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+      border:1px solid var(--line);border-radius:3px;padding:1px 5px;margin-right:6px;}
   .hrv{font-family:ui-monospace,monospace;font-size:11.5px;font-weight:700;color:#374151;white-space:nowrap;}
   .hrv::before{content:"♥ ";color:var(--accent);font-weight:400;}
   tr.qual td{background:rgba(0,0,0,.02);}
   tr.subrow td{border-top:1px dashed var(--line);}
+
   .notes{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:4px;padding:18px 20px;}
   .notes h3{margin:0 0 8px;font-size:15px;}
   .notes p{margin:8px 0;font-size:13.5px;}
+  .notes p b{color:var(--ink);}
   footer{margin-top:36px;font-size:12px;color:var(--muted);text-align:center;}
+
   @media (max-width:680px){
     .wrap{padding-left:12px;padding-right:12px;}
     .strgrid{grid-template-columns:1fr;}
@@ -112,12 +133,14 @@
     .todaytag{font-size:8px;letter-spacing:.02em;padding:1px 4px;}
     .bars{height:120px;}
     .hrv{display:block;margin-top:2px;}
+    .ses{overflow-wrap:break-word;}
   }
   @media print{
     body{background:#fff;}.wrap{max-width:none;padding:0;}
-    .week,.strcard,.vchart,.notes,.zone{break-inside:avoid;}h2{break-after:avoid;}
+    .week,.strcard,.vchart,.notes,.zone,.analysis{break-inside:avoid;}h2{break-after:avoid;}
     *{ -webkit-print-color-adjust:exact;print-color-adjust:exact;}
   }
+
 </style>
 <style id="calcCss">
   .panel{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:20px 22px;margin:18px 0 26px;}
@@ -164,6 +187,68 @@
   .strcard ul{margin:12px 0 4px;padding-left:18px;}
   .strcard li{margin:5px 0;font-size:13.5px;}
   @media (max-width:680px){.strgrid{grid-template-columns:1fr;}}
+  .importrow{display:flex;align-items:center;gap:10px;margin-top:14px;padding-top:14px;border-top:1px dashed var(--line);flex-wrap:wrap;}
+  .importnote{background:#eef4fb;border:1px solid #c9dcef;border-left:5px solid var(--z-long);border-radius:4px;
+    padding:10px 14px;margin:12px 0;font-size:13px;color:#1e3a5f;display:none;}
+  .editorsec{display:none;margin-top:10px;}
+  .editweek{background:var(--card);border:1px solid var(--line);border-radius:5px;margin-bottom:12px;overflow:hidden;}
+  .ewhead{padding:9px 14px;font-weight:700;font-size:13px;background:var(--paper);border-bottom:1px solid var(--line);}
+  .editweek table{width:100%;border-collapse:collapse;table-layout:fixed;}
+  .editweek td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:middle;font-size:13px;overflow-wrap:break-word;}
+  .editweek td:nth-child(1){width:130px;}
+  .editweek td:nth-child(2){width:92px;}
+  .editweek td:nth-child(3){width:210px;}
+  .editweek td:nth-child(5){width:64px;}
+  .editweek tr:last-child td{border-bottom:none;}
+  .ed-date{width:100%;padding:4px 6px;border:1px solid var(--line);border-radius:4px;font:inherit;font-size:12.5px;}
+  .ed-name{width:100%;padding:4px 6px;border:1px solid var(--line);border-radius:4px;font:inherit;font-size:13px;}
+  .ed-desc{overflow-wrap:break-word;}
+  .ed-actions{white-space:nowrap;width:64px;}
+  @media (max-width:680px){
+    .editweek td:nth-child(1){width:100px;}
+    .editweek td:nth-child(2){width:64px;padding:6px 3px;}
+    .editweek td:nth-child(2) .chip{white-space:normal;font-size:9px;line-height:1.15;padding:2px 4px;}
+    .editweek td:nth-child(3){width:120px;}
+    .editweek td:nth-child(5){width:56px;}
+    .editweek td{font-size:12px;padding:5px 5px;}
+  }
+  .edbtn{appearance:none;border:1px solid var(--line);background:#fff;border-radius:4px;cursor:pointer;
+    padding:3px 7px;font-size:13px;margin-right:4px;}
+  .edbtn.del{color:#c0392b;border-color:#e5b5b5;}
+  .modal-overlay{display:none;position:fixed;inset:0;background:rgba(20,20,20,.45);z-index:100;
+    align-items:center;justify-content:center;padding:20px;}
+  .modal{background:#fff;border-radius:8px;padding:22px 24px;max-width:560px;width:100%;max-height:88vh;overflow:auto;}
+  .modal h3{margin:0 0 14px;font-size:17px;}
+  .modal label{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+    margin:12px 0 4px;font-weight:700;}
+  .modal input[type=text],.modal input[type=date],.modal input[type=number],.modal select,.modal textarea{
+    width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:4px;font:inherit;font-size:13.5px;}
+  .modal textarea{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;min-height:140px;resize:vertical;}
+  .modal .mrow{display:flex;gap:10px;}
+  .modal .mrow>div{flex:1;}
+  .modal .mbtns{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;}
+  .modal-wide{max-width:640px;}
+  .steprow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0;padding:7px 8px;
+    background:#f7f6f2;border-radius:5px;}
+  .steprow.nested{background:#eeece5;}
+  .steprow select,.steprow input[type=text],.steprow input[type=number]{
+    padding:5px 6px;border:1px solid var(--line);border-radius:4px;font:inherit;font-size:12.5px;background:#fff;}
+  .steprow .stype{width:118px;}
+  .steprow .send{width:88px;}
+  .steprow .sdur{width:64px;}
+  .steprow .sdist{width:76px;}
+  .steprow .stgt{width:82px;}
+  .steprow .szone{width:56px;}
+  .steprow .space{width:46px;}
+  .steprow .slabel{width:118px;flex:1;min-width:90px;}
+  .steprow .unit{font-size:11.5px;color:var(--muted);}
+  .stepblock{border:1px dashed var(--line);border-radius:6px;padding:8px 8px 4px;margin:8px 0;background:#fbfaf7;}
+  .stepblock .blockhead{display:flex;align-items:center;gap:8px;margin-bottom:2px;font-size:12.5px;font-weight:700;}
+  .stepblock .blockhead input{width:52px;padding:5px 6px;border:1px solid var(--line);border-radius:4px;font:inherit;}
+  .subSteps{margin-left:6px;padding-left:8px;border-left:2px solid var(--line);}
+  .stepsToolbar{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;}
+  .btn.sm{padding:7px 14px;font-size:12.5px;}
+  .edbtn.tiny{padding:2px 6px;font-size:12px;}
 </style>
 </head>
 <body>
@@ -218,10 +303,54 @@
       <button class="btn sec" id="printBtn" disabled>Печать / PDF</button>
     </div>
     <div class="errbox" id="errBox"></div>
+    <div class="importrow">
+      <input type="file" id="importInput" accept="application/json,.json" style="display:none">
+      <button class="btn sec" onclick="document.getElementById('importInput').click()">📂 Импортировать plan.json</button>
+      <span class="hint" style="margin:0">— откроет сохранённый план для просмотра, правки и повторного экспорта</span>
+    </div>
+    <div class="importnote" id="importNote"></div>
   </section>
 
   <div id="out"></div>
+
+  <section class="editorsec" id="editorSec">
+    <h2>Редактор тренировок</h2>
+    <div class="h2note">Здесь можно добавить, удалить или изменить любую тренировку — дату, название, шаги. Кнопки экспорта выше берут план из этого списка.</div>
+    <div id="editorList"></div>
+    <div class="btnrow"><button class="btn sec" onclick="openNewModal()">+ Добавить тренировку</button></div>
+  </section>
+
   <footer>Модель: VDOT (Дэниелс) · прирост формы с убывающей отдачей · правило ~10% объёма · разгрузка каждые 3–4 нед. по возрасту · зоны от ПАНО. Не является медицинской рекомендацией.</footer>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal modal-wide">
+    <h3 id="modalTitle">Правка тренировки</h3>
+    <input type="hidden" id="m_idx">
+    <div class="mrow">
+      <div><label>Дата</label><input type="date" id="m_date"></div>
+      <div><label>Тип</label><select id="m_kind" onchange="toggleModalKind()">
+        <option value="run">Бег</option><option value="str">Силовая</option></select></div>
+    </div>
+    <label>Название</label><input type="text" id="m_name">
+    <div id="m_runFields">
+      <label>Шаги тренировки</label>
+      <div id="m_stepsEditor"></div>
+      <div class="stepsToolbar">
+        <button type="button" class="btn sec sm" onclick="addStep()">+ Шаг</button>
+        <button type="button" class="btn sec sm" onclick="addRepeat()">+ Блок повторов</button>
+      </div>
+      <div class="h2note" id="m_notePreview" style="margin-top:10px"></div>
+    </div>
+    <div id="m_strFields" style="display:none">
+      <label>Описание / упражнения</label><textarea id="m_desc" style="min-height:80px;font-family:inherit;font-size:13.5px"></textarea>
+      <label>Длительность, мин</label><input type="number" id="m_mins" value="20" min="5" max="120">
+    </div>
+    <div class="mbtns">
+      <button class="btn sec" onclick="closeModal()">Отмена</button>
+      <button class="btn" onclick="saveModal()">Сохранить</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -272,6 +401,7 @@ const lerpR=(a,b,f)=>[lerp(a[0],b[0],f),lerp(a[1],b[1],f)];
 
 // ================= шаги тренировки (DSL, совместим с garmin_plan_import.py) =================
 const st=(t,end,v,tg,d)=>{const o={t,end,v:Math.round(v),tg};if(d)o.d=d;return o;};
+// фабрика пульсовых целей: по умолчанию зоны Garmin; при заданном ПАНО — конкретные уд/мин
 const HRZ=z=>({hr:z}); // цели тренировок — всегда зоны Garmin Z1–Z5
 // уд/мин от ПАНО — СПРАВОЧНО (показ в плане), в цели Garmin не пишутся
 function zbpm(z,lt,hrmax){const r={1:[0.65,0.81],2:[0.81,0.89],3:[0.88,0.92],4:[0.95,1.00],5:[1.00,1.06]}[z];
@@ -325,8 +455,8 @@ function fuelFor(min,weight,isRace){
   return {gph,total,gels};}
 
 // ================= основной генератор =================
-// cfg: {startISO, marathonISO, tuneRaces[{iso,dist}], cur10, curMar|null, tgt10, tgtMar,
-//       peakVol+volUnit, runs(4..7), strength(0..2), age, weight, slider(0=скорость..1=выносливость), tag}
+// cfg: {startISO, marathonISO, tuneISO[], cur10, curMar|null, tgt10, tgtMar,
+//       peakKm, runs(4..7), strength, age, slider(0=скорость..1=выносливость), tag, planName}
 function buildPlan(cfg){
   const notes=[];
   const hrmax=Math.round(208-0.7*(cfg.age||35));
@@ -589,7 +719,255 @@ function buildPlan(cfg){
 
 // ===================== UI =====================
 const $=id=>document.getElementById(id);
-let LAST=null;
+let LAST=null, EDIT=null, META=null, ANALYTICS_HTML='';
+
+// ---- вспомогательные функции для редактора: работают БЕЗ недельного R (только явные данные шага) ----
+function paceSecs(x){const[p,q]=String(x).split(':').map(Number);return p*60+q;}
+function cloneWorkouts(arr){return JSON.parse(JSON.stringify(arr));}
+function stepMinNoR(s){
+  if(s.t==='repeat')return s.steps.reduce((a,x)=>a+stepMinNoR(x),0)*s.n;
+  if(s.end==='time')return s.v/60;
+  if(s.tg&&s.tg.pace){const p=(paceSecs(s.tg.pace[0])+paceSecs(s.tg.pace[1]))/2;return (s.v/1000)*p/60;}
+  return 0;
+}
+function stepKmNoR(s){
+  if(s.t==='repeat')return s.steps.reduce((a,x)=>a+stepKmNoR(x),0)*s.n;
+  if(s.end==='distance')return s.v/1000;
+  if(s.tg&&s.tg.pace){const p=(paceSecs(s.tg.pace[0])+paceSecs(s.tg.pace[1]))/2;return s.v/p;}
+  return 0;
+}
+const sesMinNoR=steps=>steps.reduce((a,s)=>a+stepMinNoR(s),0);
+const sesKmNoR =steps=>steps.reduce((a,s)=>a+stepKmNoR(s),0);
+function firstPaceOf(steps){
+  const rec=s=>{if(s.t==='repeat'){for(const q of s.steps){const r=rec(q);if(r)return r;}return null;}
+    return (s.tg&&s.tg.pace&&s.t!=='recovery')?s.tg.pace:null;};
+  for(const s of steps){const p=rec(s);if(p)return p;}
+  return null;
+}
+function targetLabelNoR(w,cfgRef){
+  if(w.kind==='str')return 'ОФП';
+  const p=firstPaceOf(w.steps||[]);
+  if(p)return `${p[0]}–${p[1]}/км`;
+  const s0=(w.steps||[])[0];
+  if(s0&&s0.tg&&s0.tg.hr){
+    const z=s0.tg.hr;
+    if(cfgRef&&cfgRef.lthr){const hrmax=Math.round(208-0.7*(cfgRef.age||35));const r=zbpm(z,cfgRef.lthr,hrmax);return `Z${z} · ${r[0]}–${r[1]} уд`;}
+    return `Z${z}`;
+  }
+  return '';
+}
+function groupEditByWeek(list){
+  const arr=list.map((w,idx)=>({...w,_idx:idx,_date:dParse(w.date)})).sort((a,b)=>a._date-b._date);
+  const weeks=[];
+  arr.forEach(w=>{const mon=dISO(toMonday(w._date));let g=weeks.find(x=>x.mon===mon);
+    if(!g){g={mon,items:[]};weeks.push(g);} g.items.push(w);});
+  weeks.sort((a,b)=>a.mon<b.mon?-1:1);
+  return weeks;
+}
+function editRowHtml(w,cfgRef){
+  const isRun=w.kind==='run';
+  const desc=isRun?describe(w.steps):(w.desc||'');
+  const min=isRun?sesMinNoR(w.steps):(w.mins||0);
+  const km=isRun?sesKmNoR(w.steps):0;
+  const tgt=isRun?targetLabelNoR(w,cfgRef):'ОФП';
+  return `<tr>
+    <td><input type="date" value="${w.date}" onchange="editField(${w._idx},'date',this.value)" class="ed-date"></td>
+    <td><span class="chip" style="background:var(${w.kind==='str'?'--z-rep':'--z-easy'})">${w.kind==='str'?'Силовая':'Бег'}</span></td>
+    <td><input type="text" value="${esc(w.name)}" onchange="editField(${w._idx},'name',this.value)" class="ed-name"></td>
+    <td class="ed-desc">${esc(desc)}${km?` <span class="kmref">≈${km.toFixed(km<10?1:0)} км</span>`:''}${min?` <span class="kmref">${hm(min)}</span>`:''} <span class="hrv">${esc(tgt)}</span></td>
+    <td class="ed-actions"><button class="edbtn" onclick="openEditModal(${w._idx})" title="Править">✎</button><button class="edbtn del" onclick="deleteWorkout(${w._idx})" title="Удалить">🗑</button></td>
+  </tr>`;
+}
+function renderEditor(){
+  const sec=$('editorSec');
+  if(!EDIT){sec.style.display='none';return;}
+  sec.style.display='block';
+  const cfgRef=(LAST&&LAST.cfg)||(META&&META.cfg)||null;
+  const weeks=groupEditByWeek(EDIT);
+  $('editorList').innerHTML = weeks.length ? weeks.map(g=>
+    `<div class="editweek"><div class="ewhead">Неделя от ${fmtDM(dParse(g.mon))}</div><table><tbody>${
+      g.items.map(w=>editRowHtml(w,cfgRef)).join('')}</tbody></table></div>`).join('')
+    : '<p class="h2note">Пока нет тренировок — добавьте первую кнопкой ниже.</p>';
+}
+function editField(idx,key,val){ if(EDIT&&EDIT[idx])EDIT[idx][key]=val; }
+function deleteWorkout(idx){
+  if(!EDIT||!EDIT[idx])return;
+  if(!confirm(`Удалить «${EDIT[idx].name}»?`))return;
+  EDIT.splice(idx,1); renderEditor();
+}
+function toggleModalKind(){
+  const k=$('m_kind').value;
+  $('m_runFields').style.display=k==='run'?'':'none';
+  $('m_strFields').style.display=k==='str'?'':'none';
+}
+
+// ---- редактор шагов внутри модалки: MODAL_STEPS — рабочая копия шагов текущей тренировки ----
+let MODAL_STEPS=[];
+const T_LABEL={warmup:'Разминка',cooldown:'Заминка',interval:'Интервал',recovery:'Восстановление',other:'Другое'};
+function fmtDurMMSS(v){return fmtP(v);} // секунды -> м:сс (переиспользуем существующий форматтер)
+function stepAt(path){
+  const parts=String(path).split('.').map(Number);
+  return parts.length===1?MODAL_STEPS[parts[0]]:MODAL_STEPS[parts[0]].steps[parts[1]];
+}
+function setStepField(path,key,val){
+  const s=stepAt(path); if(!s)return;
+  if(key==='n')s.n=Math.max(1,Math.min(30,Math.round(+val)||1));
+  else if(key==='t')s.t=val;
+  else if(key==='d')s.d=val.trim()||undefined;
+  renderStepsEditor();
+}
+function setStepEnd(path,val){
+  const s=stepAt(path); if(!s)return;
+  s.end=val; s.v = val==='time' ? 600 : 1000;
+  renderStepsEditor();
+}
+function setDurMMSS(path,val){
+  const s=stepAt(path); if(!s)return;
+  const secs=paceSecs(val); s.v = isNaN(secs)?s.v:Math.max(5,secs);
+  updateNotePreview();
+}
+function setDistM(path,val){
+  const s=stepAt(path); if(!s)return;
+  s.v=Math.max(50,Math.round(+val||0));
+  updateNotePreview();
+}
+function setStepTarget(path,type){
+  const s=stepAt(path); if(!s)return;
+  if(type==='none')s.tg={none:1};
+  else if(type==='zone')s.tg={hr:(s.tg&&s.tg.hr)||2};
+  else if(type==='pace')s.tg={pace:(s.tg&&s.tg.pace)||['5:00','5:10']};
+  renderStepsEditor();
+}
+function setStepZone(path,z){const s=stepAt(path);if(s)s.tg={hr:+z};}
+function setStepPace(path,i,val){const s=stepAt(path);if(!s)return;if(!s.tg.pace)s.tg.pace=['0:00','0:00'];s.tg.pace[i]=val;}
+function addStep(){MODAL_STEPS.push({t:'interval',end:'time',v:600,tg:{hr:2}});renderStepsEditor();}
+function addRepeat(){MODAL_STEPS.push({t:'repeat',n:4,
+  steps:[{t:'interval',end:'distance',v:1000,tg:{pace:['4:00','4:10']}},{t:'recovery',end:'time',v:90,tg:{hr:1}}]});renderStepsEditor();}
+function addSubStep(idx){MODAL_STEPS[+idx].steps.push({t:'recovery',end:'time',v:60,tg:{hr:1}});renderStepsEditor();}
+function removeStep(path){
+  const parts=String(path).split('.').map(Number);
+  if(parts.length===1)MODAL_STEPS.splice(parts[0],1);
+  else MODAL_STEPS[parts[0]].steps.splice(parts[1],1);
+  renderStepsEditor();
+}
+function stepRowHtml(s,path,nested){
+  const tgType=s.tg&&s.tg.pace?'pace':(s.tg&&s.tg.hr?'zone':'none');
+  return `<div class="steprow${nested?' nested':''}">
+    <select class="stype" onchange="setStepField('${path}','t',this.value)">
+      ${Object.entries(T_LABEL).map(([k,l])=>`<option value="${k}" ${s.t===k?'selected':''}>${l}</option>`).join('')}
+    </select>
+    <select class="send" onchange="setStepEnd('${path}',this.value)">
+      <option value="time" ${s.end==='time'?'selected':''}>время</option>
+      <option value="distance" ${s.end==='distance'?'selected':''}>дистанция</option>
+    </select>
+    ${s.end==='time'
+      ?`<input type="text" class="sdur" value="${fmtDurMMSS(s.v)}" placeholder="мм:сс" onchange="setDurMMSS('${path}',this.value)"><span class="unit">мм:сс</span>`
+      :`<input type="number" class="sdist" value="${s.v}" min="50" step="50" onchange="setDistM('${path}',this.value)"><span class="unit">метров</span>`}
+    <select class="stgt" onchange="setStepTarget('${path}',this.value)">
+      <option value="none" ${tgType==='none'?'selected':''}>без цели</option>
+      <option value="zone" ${tgType==='zone'?'selected':''}>зона</option>
+      <option value="pace" ${tgType==='pace'?'selected':''}>темп</option>
+    </select>
+    ${tgType==='zone'?`<select class="szone" onchange="setStepZone('${path}',this.value)">
+      ${[1,2,3,4,5].map(z=>`<option value="${z}" ${s.tg.hr===z?'selected':''}>Z${z}</option>`).join('')}</select>`:''}
+    ${tgType==='pace'?`<input type="text" class="szone" value="${s.tg.pace[0]}" placeholder="м:сс" onchange="setStepPace('${path}',0,this.value)">
+      <span class="space">–</span>
+      <input type="text" class="szone" value="${s.tg.pace[1]}" placeholder="м:сс" onchange="setStepPace('${path}',1,this.value)"><span class="unit">/км</span>`:''}
+    <input type="text" class="slabel" value="${esc(s.d||'')}" placeholder="метка (необязательно)" onchange="setStepField('${path}','d',this.value)">
+    <button type="button" class="edbtn del tiny" onclick="removeStep('${path}')" title="Удалить шаг">✕</button>
+  </div>`;
+}
+function repeatBlockHtml(s,idx){
+  return `<div class="stepblock">
+    <div class="blockhead">Повтор ×<input type="number" min="1" max="30" value="${s.n}" onchange="setStepField('${idx}','n',this.value)">
+      <button type="button" class="edbtn del tiny" onclick="removeStep('${idx}')" title="Удалить блок">✕ блок</button></div>
+    <div class="subSteps">${s.steps.map((sub,j)=>stepRowHtml(sub,idx+'.'+j,true)).join('')}</div>
+    <button type="button" class="edbtn tiny" onclick="addSubStep(${idx})">+ шаг в повтор</button>
+  </div>`;
+}
+function renderStepsEditor(){
+  $('m_stepsEditor').innerHTML = MODAL_STEPS.length
+    ? MODAL_STEPS.map((s,i)=> s.t==='repeat'?repeatBlockHtml(s,i):stepRowHtml(s,String(i),false)).join('')
+    : '<p class="h2note">Нет шагов — добавьте первый.</p>';
+  updateNotePreview();
+}
+function isRaceEffort(steps){
+  return steps.some(s=>(s.end==='distance'&&s.v>=9500)||(s.t==='repeat'&&s.steps.some(x=>x.end==='distance'&&x.v>=9500)));
+}
+function updateNotePreview(){
+  const min=sesMinNoR(MODAL_STEPS);
+  const cfgRef=(LAST&&LAST.cfg)||(META&&META.cfg)||null;
+  const weight=(cfgRef&&cfgRef.weight)||60;
+  const f=fuelFor(min,weight,isRaceEffort(MODAL_STEPS));
+  $('m_notePreview').textContent = f
+    ? `Заметка (автоматически): Питание ~${f.gph} г/ч · всего ~${f.total} г ≈ ${f.gels} гел.`
+    : 'Заметка (автоматически): не требуется — сессия короче 75 минут.';
+}
+
+function openEditModal(idx){
+  const w=EDIT[idx]; if(!w)return;
+  $('modalTitle').textContent='Правка тренировки'; $('m_idx').value=idx;
+  $('m_kind').value=w.kind; $('m_date').value=w.date; $('m_name').value=w.name;
+  toggleModalKind();
+  if(w.kind==='run'){MODAL_STEPS=JSON.parse(JSON.stringify(w.steps));renderStepsEditor();}
+  else {$('m_desc').value=w.desc||'';$('m_mins').value=w.mins||20;}
+  $('modalOverlay').style.display='flex';
+}
+function openNewModal(){
+  $('modalTitle').textContent='Новая тренировка'; $('m_idx').value='-1';
+  $('m_kind').value='run'; $('m_date').value=$('startD').value||dISO(new Date());
+  $('m_name').value='Тренировка'; toggleModalKind();
+  MODAL_STEPS=[{t:'interval',end:'time',v:1800,tg:{hr:2},d:'Лёгкий'}]; renderStepsEditor();
+  $('m_desc').value=''; $('m_mins').value=20;
+  if(!EDIT){EDIT=[];META=META||{tag:$('tag').value||'[GEN]',schema:1,generated:dISO(new Date())};}
+  $('modalOverlay').style.display='flex';
+}
+function closeModal(){$('modalOverlay').style.display='none';}
+function saveModal(){
+  const idx=+$('m_idx').value, kind=$('m_kind').value;
+  const w={date:$('m_date').value,kind,name:$('m_name').value.trim()||'Тренировка'};
+  if(!w.date){alert('Укажите дату.');return;}
+  if(kind==='run'){
+    if(!MODAL_STEPS.length){alert('Добавьте хотя бы один шаг.');return;}
+    w.steps=JSON.parse(JSON.stringify(MODAL_STEPS));
+    const cfgRef=(LAST&&LAST.cfg)||(META&&META.cfg)||null;
+    const f=fuelFor(sesMinNoR(w.steps),(cfgRef&&cfgRef.weight)||60,isRaceEffort(w.steps));
+    if(f)w.note=`Питание ~${f.gph} г/ч · всего ~${f.total} г ≈ ${f.gels} гел.`;
+  } else {w.desc=$('m_desc').value.trim(); w.mins=+$('m_mins').value||20;}
+  if(!EDIT)EDIT=[];
+  if(idx>=0)EDIT[idx]=w; else EDIT.push(w);
+  closeModal(); renderEditor();
+  ['jsonBtn','htmlBtn','printBtn'].forEach(id=>$(id).disabled=false);
+}
+function fillForm(cfg){
+  $('cur10').value=fmtT(cfg.cur10); $('curMar').value=cfg.curMar?fmtT(cfg.curMar):'';
+  $('tgt10').value=fmtT(cfg.tgt10); $('tgtMar').value=fmtT(cfg.tgtMar);
+  $('age').value=cfg.age; $('weight').value=cfg.weight;
+  $('lthr').value=cfg.lthr||''; $('ltpace').value=cfg.ltPace?fmtP(cfg.ltPace):'';
+  $('startD').value=cfg.startISO; $('marD').value=cfg.marathonISO;
+  const tr=cfg.tuneRaces||[];
+  ['t1','t2','t3'].forEach((id,i)=>$(id).value=tr[i]?tr[i].iso:'');
+  ['td1','td2','td3'].forEach((id,i)=>$(id).value=tr[i]?tr[i].dist:10000);
+  $('peakVol').value=cfg.peakVol; $('volUnit').value=cfg.volUnit; $('runs').value=cfg.runs;
+  $('tag').value=cfg.tag; $('strength').value=cfg.strength;
+  $('slider').value=Math.round((cfg.slider==null?0.5:cfg.slider)*100); $('slider').oninput();
+}
+function renderStaticFromEdit(cfgRef){
+  const weeks=groupEditByWeek(EDIT);
+  return weeks.map(g=>{
+    const rows=g.items.map(w=>{
+      const isRun=w.kind==='run';
+      const desc=isRun?describe(w.steps):(w.desc||'');
+      const min=isRun?sesMinNoR(w.steps):(w.mins||0);
+      const km=isRun?sesKmNoR(w.steps):0;
+      const tgt=isRun?targetLabelNoR(w,cfgRef):'ОФП';
+      return `<tr data-date="${w.date}"><td class="day">${fmtDM(w._date)}</td>
+        <td class="chip-cell"><span class="chip" style="background:var(${w.kind==='str'?'--z-rep':'--z-easy'})">${w.kind==='str'?'Силовая':'Бег'}</span></td>
+        <td class="ses"><b>${esc(w.name)}</b> — ${esc(desc)}${km?` <span class="kmref">≈${km.toFixed(km<10?1:0)} км</span>`:''}${min?` <span class="kmref">${hm(min)}</span>`:''} &nbsp;<span class="hrv">${esc(tgt)}</span></td></tr>`;
+    }).join('');
+    return `<div class="week"><div class="whead"><div class="wmeta"><div class="dates">Неделя от ${fmtDM(dParse(g.mon))}</div></div></div><table><tbody>${rows}</tbody></table></div>`;
+  }).join('');
+}
 
 (function initDates(){
   const t=new Date();t.setHours(0,0,0,0);
@@ -614,7 +992,7 @@ function readCfg(){
   const cfg={startISO:$('startD').value,marathonISO:$('marD').value,tuneRaces:tune,
     cur10:req('cur10','текущий 10 км'),curMar:$('curMar').value?req('curMar','текущий марафон'):null,
     tgt10:req('tgt10','цель 10 км'),tgtMar:req('tgtMar','цель марафон'),
-    age:+$('age').value||35,weight:+$('weight').value||60,
+    age:+$('age').value||35,weight:+$('weight').value||70,
     lthr:$('lthr').value?+$('lthr').value:null,
     ltPace:$('ltpace').value?(()=>{const p=$('ltpace').value.trim().split(':').map(Number);
       if(p.length!==2||p.some(isNaN))throw 'Темп ПАНО — в формате м:сс, например 4:10.';return p[0]*60+p[1];})():null,
@@ -736,7 +1114,8 @@ function render(p){
     if(cfg.strength>=2)h+=card(STR_B,'Среда');
     h+=card(STR_COR,'Подводка / неделя гонки');
     return h+'</div>';})():'';
-  $('out').innerHTML=verdicts+facts+zones+strSec+charts+`<h2>Недельный план</h2>`+weeksHtml;
+  $('out').innerHTML=verdicts+facts+zones+strSec+charts+`<h2>Недельный план (снимок при построении)</h2><div class="h2note">Точный расчёт для этих параметров. Правки в редакторе тренировок ниже сюда не попадают — используйте его как черновик для просмотра/экспорта.</div>`+weeksHtml;
+  ANALYTICS_HTML=verdicts+facts+zones+strSec+charts;
 }
 
 $('goBtn').onclick=()=>{
@@ -746,28 +1125,62 @@ $('goBtn').onclick=()=>{
     const p=buildPlan(cfg);
     if(p.error)throw p.error;
     LAST=p; render(p);
+    META={tag:cfg.tag,name:`План: марафон ${fmtT(p.analysis.endMar)} · ${cfg.marathonISO}`,
+      marathon:cfg.marathonISO,generated:dISO(new Date()),schema:1,cfg};
+    EDIT=cloneWorkouts(p.workouts);
+    renderEditor();
     ['jsonBtn','htmlBtn','printBtn'].forEach(id=>$(id).disabled=false);
     document.querySelector('#out h2').scrollIntoView({behavior:'smooth'});
   }catch(e){$('errBox').textContent=typeof e==='string'?e:('Ошибка: '+(e.message||e));$('errBox').style.display='block';}
 };
 
+$('importInput').onchange=(e)=>{
+  const f=e.target.files[0]; if(!f)return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    let data;
+    try{data=JSON.parse(reader.result);}catch(err){alert('Не удалось разобрать JSON: '+err.message);return;}
+    if(!data||!Array.isArray(data.workouts)){alert('Файл не похож на plan.json — нет поля workouts.');return;}
+    META=Object.assign({tag:'[GEN]',schema:1},data.meta||{});
+    EDIT=data.workouts.map(w=>({...w}));
+    LAST=null; ANALYTICS_HTML=''; $('out').innerHTML='';
+    const note=$('importNote');
+    if(META.cfg){
+      try{fillForm(META.cfg);}catch(err){/* поля можно поправить вручную */}
+      note.innerHTML='План загружен, поля формы заполнены из него. Нажмите «Построить план» для полной аналитики — или сразу правьте тренировки ниже (правки не сохранятся при повторном построении).';
+    } else {
+      note.innerHTML='План загружен без исходных параметров (старый экспорт или отредактирован вручную) — аналитика недоступна, но тренировки можно править и снова экспортировать.';
+    }
+    note.style.display='block';
+    renderEditor();
+    ['jsonBtn','htmlBtn','printBtn'].forEach(id=>$(id).disabled=false);
+    $('editorSec').scrollIntoView({behavior:'smooth'});
+  };
+  reader.readAsText(f,'utf-8');
+  e.target.value='';
+};
+
 function dl(name,text,mime){const b=new Blob([text],{type:mime});const u=URL.createObjectURL(b);
   const a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),3000);}
 
-$('jsonBtn').onclick=()=>{if(!LAST)return;
-  const meta={tag:LAST.cfg.tag,name:`План: марафон ${fmtT(LAST.analysis.endMar)} · ${LAST.cfg.marathonISO}`,
-    marathon:LAST.cfg.marathonISO,generated:dISO(new Date()),schema:1};
-  dl('plan.json',JSON.stringify({meta,workouts:LAST.workouts},null,1),'application/json');};
+$('jsonBtn').onclick=()=>{
+  if(!EDIT||!EDIT.length){alert('Нет тренировок для экспорта.');return;}
+  const meta={...(META||{tag:'[GEN]',schema:1}),generated:dISO(new Date())};
+  dl('plan.json',JSON.stringify({meta,workouts:EDIT},null,1),'application/json');};
 
-$('htmlBtn').onclick=()=>{if(!LAST)return;
+$('htmlBtn').onclick=()=>{
+  if(!EDIT||!EDIT.length){alert('Нет тренировок для экспорта.');return;}
   const css=document.getElementById('baseCss').textContent+document.getElementById('calcCss').textContent;
-  const title=`План подготовки · Марафон ${fmtT(LAST.analysis.endMar)} · ${LAST.cfg.marathonISO}`;
+  const cfgRef=(LAST&&LAST.cfg)||(META&&META.cfg)||null;
+  const endMarTxt=(LAST&&LAST.analysis)?fmtT(LAST.analysis.endMar):'';
+  const title=`План подготовки${endMarTxt?` · Марафон ${endMarTxt}`:''}${(META&&META.marathon)?` · ${META.marathon}`:''}`;
+  const body=(ANALYTICS_HTML||'')+`<h2>Недельный план</h2>`+renderStaticFromEdit(cfgRef);
   const doc=`<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>
 <style>${css}</style></head><body><div class="wrap">
 <div class="topbar"><button class="jumpbtn" id="jumpBtn" onclick="jumpToday()">📍 К текущему дню</button></div>
 <header><div class="eyebrow">Сгенерировано калькулятором</div><h1>${title.replace('· ','·<br>')}</h1></header>
-${$('out').innerHTML}
+${body}
 <footer>Сгенерировано ${dISO(new Date())}. Лёгкие и длинные — по времени и пульсу; качественные — по темпу.</footer></div>
 <script>function jumpToday(){var r=document.querySelector('tr.today');
 if(r)r.scrollIntoView({behavior:'smooth',block:'center'});}
