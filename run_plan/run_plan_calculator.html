@@ -681,12 +681,14 @@ function buildPlan(cfg){
       if(strN>=2&&phase!=='down')days[(runs>=5?2:4)].items.push({kind:'str',...STR_B});
     } else if(strN>0&&phase==='taper'){days[0].items.push({kind:'str',...STR_COR});}
 
-    // --- питание на длинных и марафоне ---
+    // --- питание (по длительности ≥75 мин, единое правило с редактором); разбор шагов собирает garmin_plan_import.py ---
     const wgt=cfg.weight||60;
     days.forEach(d=>d.items.forEach(x=>{
-      if(x.kind==='run'&&(x.z==='long'||(x.z==='race'&&raceHere))){
-        const f=fuelFor(sesMin(x.steps,R),wgt,x.z==='race');
-        if(f){x.fuel=f;x.note=`Питание ~${f.gph} г/ч · всего ~${f.total} г ≈ ${f.gels} гел.`;}}}));
+      if(x.kind!=='run')return;
+      const isRaceX=x.z==='race'&&raceHere;
+      const f=fuelFor(sesMin(x.steps,R),wgt,isRaceX);
+      if(f){x.fuel=f;x.note=`Питание ~${f.gph} г/ч · всего ~${f.total} г ≈ ${f.gels} гел.`;}
+    }));
 
     // --- итоги недели + экспорт ---
     let wKm=0,wMin=0;
@@ -770,11 +772,12 @@ function editRowHtml(w,cfgRef){
   const min=isRun?sesMinNoR(w.steps):(w.mins||0);
   const km=isRun?sesKmNoR(w.steps):0;
   const tgt=isRun?targetLabelNoR(w,cfgRef):'ОФП';
+  const fuel=isRun?fuelForWorkout(w,cfgRef):null;
   return `<tr>
     <td><input type="date" value="${w.date}" onchange="editField(${w._idx},'date',this.value)" class="ed-date"></td>
     <td><span class="chip" style="background:var(${w.kind==='str'?'--z-rep':'--z-easy'})">${w.kind==='str'?'Силовая':'Бег'}</span></td>
     <td><input type="text" value="${esc(w.name)}" onchange="editField(${w._idx},'name',this.value)" class="ed-name"></td>
-    <td class="ed-desc">${esc(desc)}${km?` <span class="kmref">≈${km.toFixed(km<10?1:0)} км</span>`:''}${min?` <span class="kmref">${hm(min)}</span>`:''} <span class="hrv">${esc(tgt)}</span></td>
+    <td class="ed-desc">${esc(desc)}${km?` <span class="kmref">≈${km.toFixed(km<10?1:0)} км</span>`:''}${min?` <span class="kmref">${hm(min)}</span>`:''}${fuel?` <span class="fuel">~${fuel.gph} г/ч · ≈${fuel.gels} гел.</span>`:''} <span class="hrv">${esc(tgt)}</span></td>
     <td class="ed-actions"><button class="edbtn" onclick="openEditModal(${w._idx})" title="Править">✎</button><button class="edbtn del" onclick="deleteWorkout(${w._idx})" title="Удалить">🗑</button></td>
   </tr>`;
 }
@@ -894,11 +897,14 @@ function renderStepsEditor(){
 function isRaceEffort(steps){
   return steps.some(s=>(s.end==='distance'&&s.v>=9500)||(s.t==='repeat'&&s.steps.some(x=>x.end==='distance'&&x.v>=9500)));
 }
-function updateNotePreview(){
-  const min=sesMinNoR(MODAL_STEPS);
-  const cfgRef=(LAST&&LAST.cfg)||(META&&META.cfg)||null;
+function fuelForWorkout(w,cfgRef){
+  if(!w||w.kind!=='run'||!w.steps)return null;
   const weight=(cfgRef&&cfgRef.weight)||60;
-  const f=fuelFor(min,weight,isRaceEffort(MODAL_STEPS));
+  return fuelFor(sesMinNoR(w.steps),weight,isRaceEffort(w.steps));
+}
+function updateNotePreview(){
+  const cfgRef=(LAST&&LAST.cfg)||(META&&META.cfg)||null;
+  const f=fuelForWorkout({kind:'run',steps:MODAL_STEPS},cfgRef);
   $('m_notePreview').textContent = f
     ? `Заметка (автоматически): Питание ~${f.gph} г/ч · всего ~${f.total} г ≈ ${f.gels} гел.`
     : 'Заметка (автоматически): не требуется — сессия короче 75 минут.';
@@ -931,7 +937,7 @@ function saveModal(){
     if(!MODAL_STEPS.length){alert('Добавьте хотя бы один шаг.');return;}
     w.steps=JSON.parse(JSON.stringify(MODAL_STEPS));
     const cfgRef=(LAST&&LAST.cfg)||(META&&META.cfg)||null;
-    const f=fuelFor(sesMinNoR(w.steps),(cfgRef&&cfgRef.weight)||60,isRaceEffort(w.steps));
+    const f=fuelForWorkout(w,cfgRef);
     if(f)w.note=`Питание ~${f.gph} г/ч · всего ~${f.total} г ≈ ${f.gels} гел.`;
   } else {w.desc=$('m_desc').value.trim(); w.mins=+$('m_mins').value||20;}
   if(!EDIT)EDIT=[];
@@ -961,9 +967,10 @@ function renderStaticFromEdit(cfgRef){
       const min=isRun?sesMinNoR(w.steps):(w.mins||0);
       const km=isRun?sesKmNoR(w.steps):0;
       const tgt=isRun?targetLabelNoR(w,cfgRef):'ОФП';
+      const fuel=isRun?fuelForWorkout(w,cfgRef):null;
       return `<tr data-date="${w.date}"><td class="day">${fmtDM(w._date)}</td>
         <td class="chip-cell"><span class="chip" style="background:var(${w.kind==='str'?'--z-rep':'--z-easy'})">${w.kind==='str'?'Силовая':'Бег'}</span></td>
-        <td class="ses"><b>${esc(w.name)}</b> — ${esc(desc)}${km?` <span class="kmref">≈${km.toFixed(km<10?1:0)} км</span>`:''}${min?` <span class="kmref">${hm(min)}</span>`:''} &nbsp;<span class="hrv">${esc(tgt)}</span></td></tr>`;
+        <td class="ses"><b>${esc(w.name)}</b> — ${esc(desc)}${km?` <span class="kmref">≈${km.toFixed(km<10?1:0)} км</span>`:''}${min?` <span class="kmref">${hm(min)}</span>`:''}${fuel?` <span class="fuel">~${fuel.gph} г/ч · ≈${fuel.gels} гел.</span>`:''} &nbsp;<span class="hrv">${esc(tgt)}</span></td></tr>`;
     }).join('');
     return `<div class="week"><div class="whead"><div class="wmeta"><div class="dates">Неделя от ${fmtDM(dParse(g.mon))}</div></div></div><table><tbody>${rows}</tbody></table></div>`;
   }).join('');
