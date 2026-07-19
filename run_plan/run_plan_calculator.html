@@ -407,7 +407,7 @@ const HRZ=z=>({hr:z}); // цели тренировок — всегда зон�
 function zbpm(z,lt,hrmax){const r={1:[0.65,0.81],2:[0.81,0.89],3:[0.88,0.92],4:[0.95,1.00],5:[1.00,1.06]}[z];
   return [Math.max(90,Math.round(r[0]*lt)),Math.min(hrmax,Math.round(r[1]*lt))];}
 const rp=(n,steps)=>({t:'repeat',n,steps});
-const PCT=r=>({pace:[fmtP(r[0]),fmtP(r[1])]}), NOT={none:1};
+const PCT=r=>({pace:[fmtP(r[0]),fmtP(r[1])]});
 const warm=(m=15)=>st('warmup','time',m*60,HRZ(2),'Разминка');
 const cool=(m=10)=>st('cooldown','time',m*60,HRZ(1),'Заминка');
 const recS=m=>st('interval','time',m*60,HRZ(1),'Восстановительный');
@@ -501,6 +501,21 @@ function buildPlan(cfg){
     for(const k in P0)o[k]=lerpR(P0[k],P1[k],f);return o;};
 
   const peakKm=cfg.peakKm;
+  // ---- настроечные коэффициенты генератора (все "магические числа" здесь) ----
+  const TUNE={
+    startShare:.72,       // старт объёма, доля пика
+    growCap:1.10,         // макс. недельный прирост (правило ~10%)
+    downF:.76,            // множитель разгрузочной недели
+    taperShares:[.72,.60],// объём 1-й и 2-й недели подводки, доля пика
+    raceShare:.42,        // объём недели гонки (вкл. марафон)
+    longShare:[.26,.36],  // доля длинной от недели: скорость → выносливость
+    maxLongMin:[155,170], // потолок длинной, мин: скорость → выносливость
+    qDiv:16,qMin:3,qMax:7,// повторы качественной: ~км/нед / qDiv, кламп
+    easyMin:[25,75],      // клампы лёгкого дня, мин
+    recMin:[25,45],       // клампы восстановительного дня, мин
+    tuneVol:{m:.70,h:.80,t:.85},// объём недели промеж. старта: марафон/половинка/10к
+    peakRestore:.95       // мин. доля пика при переносе пиковой недели (коллизия со стартом)
+  };
   // ---- восстановление и структура ----
   const s=clamp(cfg.slider==null?0.5:cfg.slider,0,1);            // 0 скорость … 1 выносливость
   const taperW=recF>1.2?2:1;                                     // недель подводки до недели гонки
@@ -518,30 +533,35 @@ function buildPlan(cfg){
   const tuneIdx=tune.map(t=>Math.floor(dDiff(t.d,start)/7));
   const distName=x=>x>=42000?'42,2 КМ':x>=21000?'21,1 КМ':'10 КМ';
   const distPace=(R,x)=>x>=42000?R.mp:x>=21000?[(R.mp[0]+R.thr[0])/2,(R.mp[1]+R.thr[1])/2]:R.race10;
-  const tuneVolF=x=>x>=42000?0.70:x>=21000?0.80:0.85;
+  const tuneVolF=x=>x>=42000?TUNE.tuneVol.m:x>=21000?TUNE.tuneVol.h:TUNE.tuneVol.t;
   const tuneRecDays=x=>Math.ceil(postRaceEasy*(x>=42000?3:x>=21000?1.7:1));
   const kms=new Array(N).fill(0); const types=new Array(N).fill('');
-  let prev=cfg.peakKm*0.72, capped=false;
+  let prev=cfg.peakKm*TUNE.startShare, capped=false;
   for(let i=0;i<N;i++){
-    if(i===N-1){kms[i]=cfg.peakKm*0.42;types[i]='race';continue;}
-    if(i>peakIdx){const t=i-peakIdx;kms[i]=cfg.peakKm*(t===1?0.72:0.60);types[i]='taper';continue;}
+    if(i===N-1){kms[i]=cfg.peakKm*TUNE.raceShare;types[i]='race';continue;}
+    if(i>peakIdx){const t=i-peakIdx;kms[i]=cfg.peakKm*(t===1?TUNE.taperShares[0]:TUNE.taperShares[1]);types[i]='taper';continue;}
     const f=peakIdx===0?1:i/peakIdx;
-    let k=lerp(cfg.peakKm*0.72,cfg.peakKm,f);
-    if(k>prev*1.10&&i>0){k=prev*1.10;capped=true;}               // правило ~10%
+    let k=lerp(cfg.peakKm*TUNE.startShare,cfg.peakKm,f);
+    if(k>prev*TUNE.growCap&&i>0){k=prev*TUNE.growCap;capped=true;} // правило ~10%
     if(i===peakIdx)types[i]='peak';
-    if(i>0&&i<peakIdx&&(i+1)%downEvery===0){k*=0.76;types[i]='down';}
+    if(i>0&&i<peakIdx&&(i+1)%downEvery===0){k*=TUNE.downF;types[i]='down';}
     else prev=k;
     kms[i]=k;
   }
   if(capped){const real=Math.round(Math.max(...kms));
     if(real<cfg.peakKm-3)notes.push(`Заявленный пик ${cfg.peakKm} км/нед недостижим по правилу ~10% прироста за ${peakIdx} нед. роста — фактический пик ≈${real} км.`);}
   tuneIdx.forEach((ti,j)=>{if(types[ti]!=='race'){kms[ti]*=tuneVolF(tune[j].dist);types[ti]='tune';}});
+  if(peakIdx>=0&&types[peakIdx]==='tune'){ // старт съел пиковую неделю → пик переносим на ближайшую раннюю рабочую
+    let j=peakIdx-1; while(j>0&&types[j])j--;
+    if(j>0){types[j]='peak';kms[j]=Math.max(kms[j],cfg.peakKm*TUNE.peakRestore);
+      notes.push(`Промежуточный старт попал на пиковую неделю — пик объёма перенесён на неделю ${j+1}.`);}
+  }
 
   // ---- ротации качественных работ (зависят от бегунка) ----
-  const nQ=w=>clamp(Math.round(w/16),3,7);
+  const nQ=w=>clamp(Math.round(w/TUNE.qDiv),TUNE.qMin,TUNE.qMax);
   const q1For=(i,w,R,phase)=>{const n=nQ(w),k=i%3;
     if(phase==='taper')return {nm:`Острая ${Math.max(3,n-2)}x1000`,z:'vo2',
-      steps:[warm(12),...[repsD(Math.max(3,n-2),1000,R.vo2,90)],cool(10)]};
+      steps:[warm(12),repsD(Math.max(3,n-2),1000,R.vo2,90),cool(10)]};
     if(s<0.35){ // акцент скорость: короче и быстрее
       const rot=[{nm:`МПК ${n}x1000`,st:repsD(n,1000,R.vo2,90)},
                  {nm:`Короткие ${n+2}x400`,st:repsD(n+2,400,R.rep,90)},
@@ -556,6 +576,12 @@ function buildPlan(cfg){
                {nm:`Темп10к ${n}x1200`,st:repsD(n,1200,R.t10,90)},
                {nm:`Короткие ${n+2}x400`,st:repsD(n+2,400,R.rep,90)}][k];
     return {nm:rot.nm,z:'vo2',steps:[warm(15),rot.st,cool(10)]};};
+  // разгрузочная качественная: короче обычной и по акценту бегунка (без хардкода одной тренировки)
+  const downQ=(i,w,R)=>{const n=nQ(w);
+    if(s<0.35)return {nm:`Освежающие ${Math.min(8,n+2)}x400`,z:'vo2',
+      steps:[warm(12),repsD(Math.min(8,n+2),400,R.rep,100),cool(8)]};
+    if(s>0.65)return {nm:'Темп10к 2x10\'',z:'thr',steps:[warm(12),repsT(2,10,R.t10,2),cool(8)]};
+    return {nm:'Порог 2x8\'',z:'thr',steps:[warm(12),repsT(2,8,R.thr,2),cool(8)]};};
   const q2For=(i,w,R,phase,prog)=>{
     if(phase==='taper')return {nm:'МР 40\' одна трен.',z:'mp',steps:[warm(12),mpCont(40,{mp:R.mp}),cool(10)]};
     const specStart=Math.round(N*0.4);
@@ -572,7 +598,7 @@ function buildPlan(cfg){
   // ---- сборка недель ----
   const weeks=[]; const workouts=[];
   const strideN=s<0.35?6:4;
-  const longShare=0.26+0.10*s, maxLongMin=155+15*s;
+  const longShare=lerp(TUNE.longShare[0],TUNE.longShare[1],s), maxLongMin=lerp(TUNE.maxLongMin[0],TUNE.maxLongMin[1],s);
   const noQualUntil={};                                          // дата -> лёгкие дни после промежуточного старта
   tune.forEach(t=>{const n=tuneRecDays(t.dist);for(let k=1;k<=n;k++)noQualUntil[dISO(dAdd(t.d,k))]=1;});
 
@@ -591,7 +617,6 @@ function buildPlan(cfg){
     let lrMin=lrKm*mid(R.longp)/60; if(lrMin>maxLongMin){lrMin=maxLongMin;lrKm=Math.round(lrMin*60/mid(R.longp));}
     if(phase==='taper'){lrMin=Math.min(lrMin,95);lrKm=Math.round(lrMin*60/mid(R.longp));}
 
-    let planned=[]; // [{di, item}]
     for(let di=0;di<7;di++){
       const dt=dAdd(wStart,di), iso=dISO(dt);
       const after=dDiff(dt,marD);
@@ -639,8 +664,7 @@ function buildPlan(cfg){
       if(slot==='Q1'&&!easyDay&&phase!=='down'){const q=q1For(i,wkm,R,phase);
         items=[{kind:'run',z:q.z,name:q.nm,steps:q.steps}];}
       else if(slot==='Q2'&&!easyDay&&!(phase==='down'&&recF>1.25)){
-        if(phase==='down'){items=[{kind:'run',z:'thr',name:'Порог 2x8\'',
-          steps:[warm(12),repsT(2,8,R.thr,2),cool(8)]}];}
+        if(phase==='down'){const q=downQ(i,wkm,R);items=[{kind:'run',z:q.z,name:q.nm,steps:q.steps}];}
         else {const q=q2For(i,wkm,R,phase,prog);items=[{kind:'run',z:q.z,name:q.nm,steps:q.steps}];}}
       else if(slot==='L'){
         const mpFin=(phase==='spec'||phase==='peak'||(phase==='base'&&i%2===1&&s<0.7));
@@ -655,7 +679,6 @@ function buildPlan(cfg){
         else items=[{kind:'run',z:'long',name:`Длинная ${hm(lrMin)}`,steps:[longE(Math.round(lrMin))]}];}
       else if(slot==='R'||easyDay){items=[{kind:'run',z:'rec',name:'Восстановительный',steps:[recS(35)]}];}
       else {items=[{kind:'run',z:'easy',name:'Лёгкий',steps:[easyS(45)]}];} // placeholder, длит. подгоним ниже
-      planned.push({di,slot,easyDay});
       days.push({date:dt,items});
     }
 
@@ -668,7 +691,7 @@ function buildPlan(cfg){
       const wsum=flex.reduce((a,x)=>a+(x.z==='easy'?1:0.7),0)||1;
       flex.forEach(x=>{const share=rest*(x.z==='easy'?1:0.7)/wsum;
         const p=x.z==='easy'?mid(R.easy):mid(R.rec);
-        let m=clamp(Math.round(share*p/60),25,x.z==='easy'?75:45);
+        let m=clamp(Math.round(share*p/60),x.z==='easy'?TUNE.easyMin[0]:TUNE.recMin[0],x.z==='easy'?TUNE.easyMin[1]:TUNE.recMin[1]);
         x.steps=[x.z==='easy'?easyS(m):recS(m)];
         if(x.z==='easy'&&phase!=='taper')x.steps.push(strides(strideN,R));
         x.name=x.z==='easy'?'Лёгкий':'Восстановительный';});
@@ -676,16 +699,18 @@ function buildPlan(cfg){
 
     // --- силовые ---
     const strN=Math.max(0,Math.min(2,+cfg.strength||0));
-    if(strN>0&&!raceHere&&phase!=='taper'&&tuneDow<0){
-      days[0].items.push({kind:'str',...STR_A});
-      if(strN>=2&&phase!=='down')days[(runs>=5?2:4)].items.push({kind:'str',...STR_B});
+    if(strN>0&&!raceHere&&phase!=='taper'){
+      if(tuneDow<0){
+        days[0].items.push({kind:'str',...STR_A});
+        if(strN>=2&&phase!=='down')days[(runs>=5?2:4)].items.push({kind:'str',...STR_B});
+      } else if(tuneDow>=4){days[0].items.push({kind:'str',...STR_A});} // гонка в конце недели — A в Пн не мешает
     } else if(strN>0&&phase==='taper'){days[0].items.push({kind:'str',...STR_COR});}
 
     // --- питание (по длительности ≥75 мин, единое правило с редактором); разбор шагов собирает garmin_plan_import.py ---
     const wgt=cfg.weight||60;
     days.forEach(d=>d.items.forEach(x=>{
       if(x.kind!=='run')return;
-      const isRaceX=x.z==='race'&&raceHere;
+      const isRaceX=x.z==='race'; // единое правило с редактором (isRaceEffort): гонка — любой старт
       const f=fuelFor(sesMin(x.steps,R),wgt,isRaceX);
       if(f){x.fuel=f;x.note=`Питание ~${f.gph} г/ч · всего ~${f.total} г ≈ ${f.gels} гел.`;}
     }));
@@ -696,11 +721,11 @@ function buildPlan(cfg){
       if(x.kind==='run'){x.km=sesKm(x.steps,R);x.min=sesMin(x.steps,R);wKm+=x.km;wMin+=x.min;
         x.label=describe(x.steps);
         const wo={date:dISO(d.date),kind:'run',
-          name:`${cfg.tag} Н${i+1} ${DOW[(d.date.getDay()+6)%7]} ${x.name}`,steps:x.steps};
+          name:`${cfg.tag} W${i+1}D${(d.date.getDay()+6)%7+1} ${x.name}`,steps:x.steps};
         if(x.note)wo.note=x.note;
         workouts.push(wo);}
       if(x.kind==='str')workouts.push({date:dISO(d.date),kind:'str',
-        name:`${cfg.tag} Н${i+1} ${DOW[(d.date.getDay()+6)%7]} ${x.name}`,desc:x.desc,mins:x.mins});}));
+        name:`${cfg.tag} W${i+1}D${(d.date.getDay()+6)%7+1} ${x.name}`,desc:x.desc,mins:x.mins});}));
     const phName={base:'База',spec:'Специфика',down:'Разгрузка',peak:'Пиковая неделя',
       taper:'Подводка',race:'Неделя гонки',tune:'Неделя промежуточного старта'}[phase];
     weeks.push({n:i+1,start:wStart,end:dAdd(wStart,6),phase:phName,type:types[i],km:Math.round(wKm),
@@ -725,17 +750,38 @@ let LAST=null, EDIT=null, META=null, ANALYTICS_HTML='';
 
 // ---- вспомогательные функции для редактора: работают БЕЗ недельного R (только явные данные шага) ----
 function paceSecs(x){const[p,q]=String(x).split(':').map(Number);return p*60+q;}
+// оценка темпа по зоне (для км из шагов «время + пульс»): из cfg, иначе типовые значения
+const ZPACE_DEF={1:380,2:330,3:280,4:255,5:235}; // Z1..Z5, сек/км
+let ZPACE={...ZPACE_DEF};
+function setZPaceFrom(cfgRef){
+  try{
+    if(cfgRef&&cfgRef.cur10){
+      const curM=cfgRef.curMar||Math.round(cfgRef.cur10*4.61); // Ригель 10к→марафон
+      const R0=paceSet(curM,cfgRef.cur10);
+      let R=R0;
+      if(cfgRef.tgt10&&cfgRef.tgtMar){ // середина цикла: смесь текущих и целевых темпов
+        const R1=paceSet(cfgRef.tgtMar,cfgRef.tgt10);
+        R={}; for(const k in R0)R[k]=lerpR(R0[k],R1[k],0.5);
+      }
+      ZPACE={1:mid(R.rec),2:mid(R.easy),3:mid(R.mp),4:mid(R.thr),5:mid(R.vo2)};
+      return;
+    }
+  }catch(e){}
+  ZPACE={...ZPACE_DEF};
+}
 function cloneWorkouts(arr){return JSON.parse(JSON.stringify(arr));}
 function stepMinNoR(s){
   if(s.t==='repeat')return s.steps.reduce((a,x)=>a+stepMinNoR(x),0)*s.n;
   if(s.end==='time')return s.v/60;
   if(s.tg&&s.tg.pace){const p=(paceSecs(s.tg.pace[0])+paceSecs(s.tg.pace[1]))/2;return (s.v/1000)*p/60;}
+  if(s.tg&&s.tg.hr)return (s.v/1000)*ZPACE[s.tg.hr]/60; // дистанция + зона: оценочно
   return 0;
 }
 function stepKmNoR(s){
   if(s.t==='repeat')return s.steps.reduce((a,x)=>a+stepKmNoR(x),0)*s.n;
   if(s.end==='distance')return s.v/1000;
   if(s.tg&&s.tg.pace){const p=(paceSecs(s.tg.pace[0])+paceSecs(s.tg.pace[1]))/2;return s.v/p;}
+  if(s.tg&&s.tg.hr)return s.v/ZPACE[s.tg.hr]; // время + зона: оценочный темп зоны
   return 0;
 }
 const sesMinNoR=steps=>steps.reduce((a,s)=>a+stepMinNoR(s),0);
@@ -786,13 +832,14 @@ function renderEditor(){
   if(!EDIT){sec.style.display='none';return;}
   sec.style.display='block';
   const cfgRef=(LAST&&LAST.cfg)||(META&&META.cfg)||null;
+  setZPaceFrom(cfgRef);
   const weeks=groupEditByWeek(EDIT);
   $('editorList').innerHTML = weeks.length ? weeks.map(g=>
     `<div class="editweek"><div class="ewhead">Неделя от ${fmtDM(dParse(g.mon))}</div><table><tbody>${
       g.items.map(w=>editRowHtml(w,cfgRef)).join('')}</tbody></table></div>`).join('')
     : '<p class="h2note">Пока нет тренировок — добавьте первую кнопкой ниже.</p>';
 }
-function editField(idx,key,val){ if(EDIT&&EDIT[idx])EDIT[idx][key]=val; }
+function editField(idx,key,val){ if(EDIT&&EDIT[idx]){EDIT[idx][key]=val; if(key==='date')renderEditor();} }
 function deleteWorkout(idx){
   if(!EDIT||!EDIT[idx])return;
   if(!confirm(`Удалить «${EDIT[idx].name}»?`))return;
@@ -842,7 +889,9 @@ function setStepTarget(path,type){
   renderStepsEditor();
 }
 function setStepZone(path,z){const s=stepAt(path);if(s)s.tg={hr:+z};}
-function setStepPace(path,i,val){const s=stepAt(path);if(!s)return;if(!s.tg.pace)s.tg.pace=['0:00','0:00'];s.tg.pace[i]=val;}
+function setStepPace(path,i,val){const s=stepAt(path);if(!s)return;
+  if(!/^\d{1,2}:[0-5]\d$/.test(String(val).trim())){renderStepsEditor();return;} // формат м:сс, иначе откат
+  if(!s.tg.pace)s.tg.pace=['5:00','5:10'];s.tg.pace[i]=String(val).trim();updateNotePreview();}
 function addStep(){MODAL_STEPS.push({t:'interval',end:'time',v:600,tg:{hr:2}});renderStepsEditor();}
 function addRepeat(){MODAL_STEPS.push({t:'repeat',n:4,
   steps:[{t:'interval',end:'distance',v:1000,tg:{pace:['4:00','4:10']}},{t:'recovery',end:'time',v:90,tg:{hr:1}}]});renderStepsEditor();}
@@ -1013,7 +1062,7 @@ function readCfg(){
 
 const ZC={rec:'--z-rec',easy:'--z-easy',mp:'--z-mp',thr:'--z-thr',vo2:'--z-vo2',long:'--z-long',race:'--z-race',rest:'--z-rest',str:'--z-rep'};
 const ZLAB={rec:'Восст.',easy:'Лёгкий',mp:'Марафон. темп',thr:'Порог',vo2:'МПК/10к',long:'Длинная',race:'Старт',rest:'Отдых',str:'Силовая'};
-const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 
 function itemTarget(x,R,zb){ // краткая цель для правой колонки
   if(x.kind==='str')return 'ОФП';
@@ -1179,6 +1228,7 @@ $('htmlBtn').onclick=()=>{
   if(!EDIT||!EDIT.length){alert('Нет тренировок для экспорта.');return;}
   const css=document.getElementById('baseCss').textContent+document.getElementById('calcCss').textContent;
   const cfgRef=(LAST&&LAST.cfg)||(META&&META.cfg)||null;
+  setZPaceFrom(cfgRef);
   const endMarTxt=(LAST&&LAST.analysis)?fmtT(LAST.analysis.endMar):'';
   const title=`План подготовки${endMarTxt?` · Марафон ${endMarTxt}`:''}${(META&&META.marathon)?` · ${META.marathon}`:''}`;
   const body=(ANALYTICS_HTML||'')+`<h2>Недельный план</h2>`+renderStaticFromEdit(cfgRef);
@@ -1189,14 +1239,21 @@ $('htmlBtn').onclick=()=>{
 <header><div class="eyebrow">Сгенерировано калькулятором</div><h1>${title.replace('· ','·<br>')}</h1></header>
 ${body}
 <footer>Сгенерировано ${dISO(new Date())}. Лёгкие и длинные — по времени и пульсу; качественные — по темпу.</footer></div>
-<script>function jumpToday(){var r=document.querySelector('tr.today');
+<script>function jumpToday(){var r=document.querySelector('tr.today')||window.__near;
 if(r)r.scrollIntoView({behavior:'smooth',block:'center'});}
 (function(){var t=new Date();t.setHours(0,0,0,0);
 var iso=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');
-var rows=document.querySelectorAll('tr[data-date="'+iso+'"]');
-rows.forEach(function(r){r.classList.add('today');
-var w=r.closest('.week');if(w)w.classList.add('hastoday');});
-if(!rows.length){var b=document.getElementById('jumpBtn');b.classList.add('disabled');b.textContent='План вне текущих дат';b.onclick=null;}})();<\/script></body></html>`;
+var all=Array.prototype.slice.call(document.querySelectorAll('tr[data-date]'));
+var b=document.getElementById('jumpBtn'); if(!all.length){if(b){b.classList.add('disabled');b.textContent='Нет тренировок';b.onclick=null;}return;}
+var rows=all.filter(function(r){return r.getAttribute('data-date')===iso;});
+if(rows.length){rows.forEach(function(r){r.classList.add('today');
+  var w=r.closest('.week');if(w)w.classList.add('hastoday');});return;}
+// сегодня тренировки нет: ведём к ближайшей следующей (или к финалу плана)
+var next=null;for(var i=0;i<all.length;i++){if(all[i].getAttribute('data-date')>iso){next=all[i];break;}}
+var target=next||all[all.length-1];window.__near=target;
+var d=target.getAttribute('data-date').split('-');
+if(b){b.textContent=next?('→ Ближайшая тренировка · '+d[2]+'.'+d[1]):('План завершён · '+d[2]+'.'+d[1]);}
+var w=target.closest('.week');if(w)w.classList.add('hastoday');})();<\/script></body></html>`;
   dl('run_plan.html',doc,'text/html');};
 
 $('printBtn').onclick=()=>window.print();

@@ -39,6 +39,8 @@
 """
 
 import os, sys, json, time, datetime, argparse
+try: sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception: pass
 
 TOKENS_BASE = os.path.expanduser("~/.garth")
 
@@ -76,7 +78,10 @@ TT = {"none":{"workoutTargetTypeId":1,"workoutTargetTypeKey":"no.target"},
       "pace":{"workoutTargetTypeId":6,"workoutTargetTypeKey":"pace.zone"}}
 
 def pace_ms(p):
-    m, s = p.split(":"); return round(1000.0/(int(m)*60+int(s)), 4)
+    try:
+        m, s = str(p).strip().split(":"); return round(1000.0/(int(m)*60+int(s)), 4)
+    except Exception:
+        sys.exit(f"Не разобрал темп «{p}» — ожидается формат м:сс (например 4:37).")
 
 def conv_target(tg):
     tg = tg or {}
@@ -95,7 +100,7 @@ def conv_step(s):
         return {"type":"RepeatGroupDTO","stepType":STEP["repeat"],
                 "numberOfIterations":int(s["n"]),"smartRepeat":False,
                 "workoutSteps":[conv_step(x) for x in s["steps"]]}
-    o = {"type":"ExecutableStepDTO","stepType":STEP[s["t"]],
+    o = {"type":"ExecutableStepDTO","stepType":STEP.get(s["t"], STEP["interval"]),
          "endCondition":END[s["end"]],"endConditionValue":float(s["v"]),
          **conv_target(s.get("tg"))}
     if s.get("d"): o["description"] = s["d"]
@@ -114,7 +119,7 @@ def _amt(s):
     if ec == "time":
         v = int(v)
         if v < 60: return f"{v}с"
-        return f"{v//60} мин" if v % 60 == 0 else f"{v}с"
+        return f"{v//60} мин" if v % 60 == 0 else f"{v//60}:{v%60:02d}"
     return f"{v/1000:g} км"
 def _tgt(s):
     t = s.get("targetType", {}).get("workoutTargetTypeKey")
@@ -161,7 +166,7 @@ def load_plan(path):
         items.append((d, w["name"][:79], wk))
     if not items: sys.exit("В плане нет тренировок.")
     items.sort(key=lambda x: x[0])
-    return tag, items, plan.get("meta", {})
+    return tag, items, plan.get("meta", {})  # items — весь план; --test фильтрует копию в main()
 
 def connect(cli_account=None):
     import garth
@@ -203,10 +208,11 @@ def main():
                     help="логин Garmin: токен берётся/кладётся в ~/.garth/<логин>")
     args = ap.parse_args()
 
-    tag, items, meta = load_plan(args.plan)
+    tag, all_items, meta = load_plan(args.plan)
+    items = all_items
     if args.test:
-        wk_end = items[0][0] + datetime.timedelta(days=7)
-        items = [x for x in items if x[0] < wk_end]
+        wk_end = all_items[0][0] + datetime.timedelta(days=7)
+        items = [x for x in all_items if x[0] < wk_end]
 
     if args.clear_past:
         try:
@@ -236,7 +242,7 @@ def main():
     def delete(p):     return garth.connectapi(p, method="DELETE")
 
     if args.clear or args.clear_past:
-        plan_dates = {name: d for d, name, _ in items}
+        plan_dates = {name: d for d, name, _ in all_items}  # всегда полный план, независимо от --test
         lst = get("/workout-service/workouts?start=0&limit=999") or []
         mine = [w for w in lst if str(w.get("workoutName","")).startswith(tag)]
         if args.clear_past:
@@ -252,7 +258,9 @@ def main():
                 for w in unknown: print("  ?", w.get("workoutName"))
         else:
             sel = [(plan_dates.get(w.get("workoutName")), w) for w in mine]
-            print(f"Найдено с тегом {tag}: {len(mine)}")
+            foreign = sum(1 for d, _ in sel if d is None)
+            print(f"Найдено с тегом {tag}: {len(mine)}"
+                  + (f" (из них {foreign} нет в этом plan.json — возможно, другой план с тем же тегом!)" if foreign else ""))
         for d, w in sel:
             try:
                 delete(f"/workout-service/workout/{w['workoutId']}")
@@ -262,6 +270,14 @@ def main():
             time.sleep(0.2)
         print("Очистка завершена."); return
 
+    try:
+        existing = [w for w in (get("/workout-service/workouts?start=0&limit=999") or [])
+                    if str(w.get("workoutName","")).startswith(tag)]
+        if existing:
+            print(f"ВНИМАНИЕ: в Garmin уже есть {len(existing)} тренировок с тегом {tag} — "
+                  f"повторный импорт создаст дубли. Обычно сначала нужен --clear.\n")
+    except Exception:
+        pass
     runs = sum(1 for _,_,w in items if w["sportType"]["sportTypeKey"] == "running")
     print(f"К созданию: {len(items)} (бег {runs}, силовые {len(items)-runs})"
           f"{' — только первая неделя' if args.test else ''}\n")
