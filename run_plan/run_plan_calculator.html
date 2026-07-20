@@ -1231,11 +1231,13 @@ $('htmlBtn').onclick=()=>{
   setZPaceFrom(cfgRef);
   const endMarTxt=(LAST&&LAST.analysis)?fmtT(LAST.analysis.endMar):'';
   const title=`План подготовки${endMarTxt?` · Марафон ${endMarTxt}`:''}${(META&&META.marathon)?` · ${META.marathon}`:''}`;
+  const planObj={meta:{...(META||{tag:'[GEN]',schema:1}),generated:dISO(new Date())},workouts:EDIT};
+  const planStr=JSON.stringify(JSON.stringify(planObj)).replace(/</g,'\\u003c'); // безопасно для <\/script>
   const body=(ANALYTICS_HTML||'')+`<h2>Недельный план</h2>`+renderStaticFromEdit(cfgRef);
   const doc=`<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>
 <style>${css}</style></head><body><div class="wrap">
-<div class="topbar"><button class="jumpbtn" id="jumpBtn" onclick="jumpToday()">📍 К текущему дню</button></div>
+<div class="topbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="jumpbtn" id="jumpBtn" onclick="jumpToday()">📍 К текущему дню</button><button class="jumpbtn" id="jsonBtn" onclick="dlPlanJSON()">⇩ JSON</button><button class="jumpbtn" id="pdfBtn" onclick="window.print()">⇩ PDF</button></div>
 <header><div class="eyebrow">Сгенерировано калькулятором</div><h1>${title.replace('· ','·<br>')}</h1></header>
 ${body}
 <footer>Сгенерировано ${dISO(new Date())}. Лёгкие и длинные — по времени и пульсу; качественные — по темпу.</footer></div>
@@ -1253,7 +1255,12 @@ var next=null;for(var i=0;i<all.length;i++){if(all[i].getAttribute('data-date')>
 var target=next||all[all.length-1];window.__near=target;
 var d=target.getAttribute('data-date').split('-');
 if(b){b.textContent=next?('→ Ближайшая тренировка · '+d[2]+'.'+d[1]):('План завершён · '+d[2]+'.'+d[1]);}
-var w=target.closest('.week');if(w)w.classList.add('hastoday');})();<\/script></body></html>`;
+var w=target.closest('.week');if(w)w.classList.add('hastoday');})();
+window.__PLAN__=JSON.parse(${planStr});
+function dlPlanJSON(){var t=JSON.stringify(window.__PLAN__,null,1);
+var b=new Blob([t],{type:'application/json'});var u=URL.createObjectURL(b);
+var a=document.createElement('a');a.href=u;a.download='plan.json';a.click();
+setTimeout(function(){URL.revokeObjectURL(u);},3000);}<\/script></body></html>`;
   dl('run_plan.html',doc,'text/html');};
 
 $('printBtn').onclick=()=>window.print();
