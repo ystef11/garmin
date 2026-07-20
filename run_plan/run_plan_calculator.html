@@ -121,6 +121,9 @@
   .notes p{margin:8px 0;font-size:13.5px;}
   .notes p b{color:var(--ink);}
   footer{margin-top:36px;font-size:12px;color:var(--muted);text-align:center;}
+  .jsonlink{margin-top:10px;background:none;border:none;color:var(--muted);font-size:11.5px;text-decoration:underline;text-underline-offset:2px;cursor:pointer;opacity:.7;}
+  .jsonlink:hover{opacity:1;color:var(--ink);}
+  .dot2{margin:0 8px;color:var(--muted);opacity:.6;}
 
   @media (max-width:680px){
     .wrap{padding-left:12px;padding-right:12px;}
@@ -1237,10 +1240,10 @@ $('htmlBtn').onclick=()=>{
   const doc=`<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>
 <style>${css}</style></head><body><div class="wrap">
-<div class="topbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="jumpbtn" id="jumpBtn" onclick="jumpToday()">📍 К текущему дню</button><button class="jumpbtn" id="jsonBtn" onclick="dlPlanJSON()">⇩ JSON</button><button class="jumpbtn" id="pdfBtn" onclick="window.print()">⇩ PDF</button></div>
+<div class="topbar"><button class="jumpbtn" id="jumpBtn" onclick="jumpToday()">📍 К текущему дню</button></div>
 <header><div class="eyebrow">Сгенерировано калькулятором</div><h1>${title.replace('· ','·<br>')}</h1></header>
 ${body}
-<footer>Сгенерировано ${dISO(new Date())}. Лёгкие и длинные — по времени и пульсу; качественные — по темпу.</footer></div>
+<footer>Сгенерировано ${dISO(new Date())}. Лёгкие и длинные — по времени и пульсу; качественные — по темпу.<br><button type="button" class="jsonlink" onclick="dlPlanJSON()">экспорт plan.json для Garmin</button><span class="dot2">·</span><button type="button" class="jsonlink" onclick="window.print()">сохранить PDF</button></footer></div>
 <script>function jumpToday(){var r=document.querySelector('tr.today')||window.__near;
 if(r)r.scrollIntoView({behavior:'smooth',block:'center'});}
 (function(){var t=new Date();t.setHours(0,0,0,0);
