@@ -10,7 +10,8 @@
      {"date":"2026-07-06","kind":"run","name":"[GEN] Н1 Пн Восстановительный",
       "steps":[{"t":"interval","end":"time","v":2100,"tg":{"bpm":[116,144],"z":1},"d":"Восстановительный"}, ...],
       "note":"Питание ~55 г/ч ..."},
-     {"date":"2026-07-06","kind":"str","name":"[GEN] Н1 Пн Силовая A","desc":"...","mins":25}]}
+     {"date":"2026-07-06","kind":"str","name":"[GEN] Н1 Пн Силовая A","desc":"...","mins":25},
+     {"date":"2026-07-07","kind":"cross","gtype":"cycling","name":"[GEN] Н1 Вт Велосипед","desc":"...","mins":75}]}
 Шаги: t: warmup|cooldown|interval|recovery|other|repeat; end: time(сек)|distance(м);
 цели tg: {"hr":1..5} зона Garmin | {"bpm":[lo,hi]} конкретный пульс | {"pace":["м:сс","м:сс"]} | {"none":1}.
 
@@ -69,6 +70,18 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 SPORT_RUN = {"sportTypeId": 1, "sportTypeKey": "running"}
 SPORT_STR = {"sportTypeId": 5, "sportTypeKey": "strength_training"}
+SPORT_BIKE   = {"sportTypeId": 2, "sportTypeKey": "cycling"}
+SPORT_SWIM   = {"sportTypeId": 4, "sportTypeKey": "swimming"}
+SPORT_OTHER  = {"sportTypeId": 3, "sportTypeKey": "other"}   # в аккаунте нет "кардио" — лыжи/прочий кросс сюда
+# gtype из плана -> тип тренировки Garmin. Если тип/локаль отличается — уточните ID дампом (см. README ниже).
+CROSS_SPORT = {
+    "cycling":           SPORT_BIKE,
+    "lap_swimming":      SPORT_SWIM,    # плавание в бассейне
+    "swimming":          SPORT_SWIM,
+    "cardio_training":   SPORT_OTHER,   # обратная совместимость
+    "other":             SPORT_OTHER,   # лыжи и прочий кросс без своего типа
+    "strength_training": SPORT_STR,
+}
 STEP = {k: {"stepTypeId": i, "stepTypeKey": k} for i, k in
         {1:"warmup",2:"cooldown",3:"interval",4:"recovery",5:"rest",6:"repeat",7:"other"}.items()}
 END = {"time":{"conditionTypeId":2,"conditionTypeKey":"time"},
@@ -151,7 +164,21 @@ def str_json(w):
     return {"sportType":SPORT_STR,"workoutName":w["name"][:79],"description":str(w.get("desc",""))[:1024],
             "workoutSegments":[{"segmentOrder":1,"sportType":SPORT_STR,"workoutSteps":[st]}]}
 
-def load_plan(path):
+def cross_json(w):
+    sport = CROSS_SPORT.get(w.get("gtype"), SPORT_OTHER)
+    st = {"type":"ExecutableStepDTO","stepType":STEP.get("interval", STEP["other"]),
+          "endCondition":END["time"],"endConditionValue":float(int(w.get("mins",45))*60),
+          "targetType":TT["none"],"description":str(w.get("desc",""))[:512],"stepOrder":1}
+    wk = {"sportType":sport,"workoutName":w["name"][:79],
+          "description":str(w.get("desc",""))[:1024],
+          "workoutSegments":[{"segmentOrder":1,"sportType":sport,"workoutSteps":[st]}]}
+    if sport is SPORT_SWIM:                      # Garmin ждёт длину бассейна для плавания
+        wk["poolLength"] = 50.0
+        wk["poolLengthUnit"] = {"unitId":1,"unitKey":"meter","factor":100.0}
+    return wk
+
+def load_plan(path, skip_cross=None):
+    skip_cross = set(x.strip().lower() for x in (skip_cross or []))
     try:
         with open(path, encoding="utf-8") as f: plan = json.load(f)
     except FileNotFoundError:
@@ -160,10 +187,19 @@ def load_plan(path):
         sys.exit(f"Не разобрал JSON {path}: {e}")
     tag = plan.get("meta", {}).get("tag") or "[GEN]"
     items = []
+    skipped = 0
     for w in plan.get("workouts", []):
         d = datetime.date.fromisoformat(w["date"])
-        wk = run_json(w) if w.get("kind") == "run" else str_json(w)
+        k = w.get("kind")
+        if k == "cross" and skip_cross and (
+                "all" in skip_cross or "cross" in skip_cross
+                or str(w.get("sport","")).lower() in skip_cross
+                or str(w.get("gtype","")).lower() in skip_cross):
+            skipped += 1
+            continue
+        wk = run_json(w) if k=="run" else cross_json(w) if k=="cross" else str_json(w)
         items.append((d, w["name"][:79], wk))
+    if skip_cross and skipped: print(f"Пропущено кросс-тренировок по фильтру ({','.join(sorted(skip_cross))}): {skipped}")
     if not items: sys.exit("В плане нет тренировок.")
     items.sort(key=lambda x: x[0])
     return tag, items, plan.get("meta", {})  # items — весь план; --test фильтрует копию в main()
@@ -204,11 +240,14 @@ def main():
                     help="удалить только тренировки с датой раньше сегодняшней")
     ap.add_argument("--before", metavar="ГГГГ-ММ-ДД",
                     help="граничная дата для --clear-past (по умолчанию сегодня)")
+    ap.add_argument("--skip-cross", metavar="ТИПЫ", default="",
+                    help="не импортировать заданные кросс-тренировки: sport (ski,pool,bike,fitness) "
+                         "или тип Garmin (cycling,swimming,other) через запятую; 'all' — весь кросс")
     ap.add_argument("--account", metavar="ЛОГИН",
                     help="логин Garmin: токен берётся/кладётся в ~/.garth/<логин>")
     args = ap.parse_args()
 
-    tag, all_items, meta = load_plan(args.plan)
+    tag, all_items, meta = load_plan(args.plan, (args.skip_cross or '').split(','))
     items = all_items
     if args.test:
         wk_end = all_items[0][0] + datetime.timedelta(days=7)
@@ -221,9 +260,11 @@ def main():
             sys.exit(f"Неверная дата в --before: {args.before} (нужен формат ГГГГ-ММ-ДД)")
 
     if args.dry_run:
-        runs = sum(1 for _,_,w in items if w["sportType"]["sportTypeKey"] == "running")
+        runs  = sum(1 for _,_,w in items if w["sportType"]["sportTypeKey"] == "running")
+        strs  = sum(1 for _,_,w in items if w["sportType"]["sportTypeKey"] == "strength_training")
+        cross = len(items) - runs - strs
         print(f"План: {meta.get('name','—')} | тег {tag}")
-        print(f"Будет создано: {len(items)} (бег {runs}, силовые {len(items)-runs}); "
+        print(f"Будет создано: {len(items)} (бег {runs}, силовые {strs}, кросс {cross}); "
               f"{items[0][0].isoformat()} … {items[-1][0].isoformat()}\n")
         shown = 0
         for d, name, w in items:
@@ -231,6 +272,8 @@ def main():
                 print("###", d.isoformat(), name, "\nКОММЕНТАРИЙ:", w["description"], "\n"); shown += 1
         st = next((w for _,_,w in items if w["sportType"]["sportTypeKey"] == "strength_training"), None)
         if st: print("### СИЛОВАЯ", st["workoutName"], "\nКОММЕНТАРИЙ:", st["description"], "\n")
+        cx = next((w for _,_,w in items if w["sportType"]["sportTypeKey"] not in ("running","strength_training")), None)
+        if cx: print("### КРОСС", cx["workoutName"], f"({cx['sportType']['sportTypeKey']})", "\nКОММЕНТАРИЙ:", cx["description"], "\n")
         last = items[-1][2]
         print("### ФИНАЛ", last["workoutName"], "\nJSON:",
               json.dumps(last, ensure_ascii=False, indent=1)[:800], "...")
