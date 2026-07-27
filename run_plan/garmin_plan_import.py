@@ -39,7 +39,7 @@
   python garmin_plan_import.py plan.json               # весь план
 """
 
-import os, sys, json, time, datetime, argparse
+import os, sys, json, time, datetime, argparse, getpass
 try: sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception: pass
 
@@ -218,9 +218,14 @@ def connect(cli_account=None):
             print(f"Токен {tdir} не подошёл ({e}) — пробую войти заново.")
     email = (cli_account or os.environ.get("GARMIN_EMAIL") or acct)
     pwd = os.environ.get("GARMIN_PASSWORD")
-    if not email or not pwd:
-        sys.exit("Нет валидного токена. Задай GARMIN_EMAIL и GARMIN_PASSWORD "
-                 "(и/или --account <логин>).")
+    if not email:
+        email = input("Аккаунт Garmin (email): ").strip()
+        if not email:
+            sys.exit("Аккаунт не указан.")
+    if not pwd:
+        pwd = getpass.getpass("Пароль Garmin: ")
+        if not pwd:
+            sys.exit("Пароль не указан.")
     email = email.strip().lower()
     garth.client.sess.headers.update({"User-Agent": UA})
     garth.login(email, pwd, prompt_mfa=lambda: input("Код 2FA: ").strip())
