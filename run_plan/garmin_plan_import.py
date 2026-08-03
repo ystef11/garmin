@@ -204,11 +204,18 @@ def load_plan(path, skip_cross=None):
     items.sort(key=lambda x: x[0])
     return tag, items, plan.get("meta", {})  # items — весь план; --test фильтрует копию в main()
 
-def connect(cli_account=None):
+def connect(cli_account=None, password=None, mfa_prompt=None, force_login=False):
+    """Подключение к Garmin Connect.
+
+    cli_account  — логин (email); если не задан — берётся GARMIN_EMAIL/сохранённая учётка.
+    password     — пароль явно (для GUI); если не задан — берётся GARMIN_PASSWORD/getpass.
+    mfa_prompt   — callable() -> str с кодом 2FA (по умолчанию input() в консоли).
+    force_login  — не пытаться переиспользовать сохранённый токен, сразу логиниться паролем.
+    """
     import garth
     garth.client.sess.headers.update({"User-Agent": UA})
     acct, tdir = pick_account(cli_account)
-    if tdir and _has_tokens(tdir):
+    if not force_login and tdir and _has_tokens(tdir):
         try:
             garth.resume(tdir); _ = garth.client.username
             print(f"Вход по сохранённому токену: {acct or 'legacy ~/.garth'}")
@@ -217,7 +224,7 @@ def connect(cli_account=None):
         except Exception as e:
             print(f"Токен {tdir} не подошёл ({e}) — пробую войти заново.")
     email = (cli_account or os.environ.get("GARMIN_EMAIL") or acct)
-    pwd = os.environ.get("GARMIN_PASSWORD")
+    pwd = password or os.environ.get("GARMIN_PASSWORD")
     if not email:
         email = input("Аккаунт Garmin (email): ").strip()
         if not email:
@@ -228,43 +235,35 @@ def connect(cli_account=None):
             sys.exit("Пароль не указан.")
     email = email.strip().lower()
     garth.client.sess.headers.update({"User-Agent": UA})
-    garth.login(email, pwd, prompt_mfa=lambda: input("Код 2FA: ").strip())
+    garth.login(email, pwd, prompt_mfa=mfa_prompt or (lambda: input("Код 2FA: ").strip()))
     save_dir = os.path.join(TOKENS_BASE, email)
     os.makedirs(save_dir, exist_ok=True)
     garth.save(save_dir); print("Токен сохранён в", save_dir)
     garth.client.sess.headers.update({"User-Agent": UA})
     return garth
 
-def main():
-    ap = argparse.ArgumentParser(description="Импорт plan.json в Garmin Connect")
-    ap.add_argument("plan", help="путь к plan.json из калькулятора")
-    ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--test", action="store_true", help="только первая неделя плана")
-    ap.add_argument("--clear", action="store_true", help="удалить все тренировки с тегом плана")
-    ap.add_argument("--clear-past", action="store_true",
-                    help="удалить только тренировки с датой раньше сегодняшней")
-    ap.add_argument("--before", metavar="ГГГГ-ММ-ДД",
-                    help="граничная дата для --clear-past (по умолчанию сегодня)")
-    ap.add_argument("--skip-cross", metavar="ТИПЫ", default="",
-                    help="не импортировать заданные кросс-тренировки: sport (ski,pool,bike,fitness) "
-                         "или тип Garmin (cycling,swimming,other) через запятую; 'all' — весь кросс")
-    ap.add_argument("--account", metavar="ЛОГИН",
-                    help="логин Garmin: токен берётся/кладётся в ~/.garth/<логин>")
-    args = ap.parse_args()
+def run_import(plan, dry_run=False, test=False, clear=False, clear_past=False,
+               before=None, skip_cross="", account=None, password=None, mfa_prompt=None):
+    """Библиотечная точка входа: то же самое, что раньше делал main().
 
-    tag, all_items, meta = load_plan(args.plan, (args.skip_cross or '').split(','))
+    Возвращает dict со сводкой (ok/fail/skipped и т.п.) — удобно для GUI/скриптов.
+    Всё, что раньше печаталось в stdout, печатается и сейчас (через print) —
+    вызывающий код может перехватить stdout, если нужен лог в виджете.
+    """
+    tag, all_items, meta = load_plan(plan, (skip_cross or '').split(','))
     items = all_items
-    if args.test:
+    if test:
         wk_end = all_items[0][0] + datetime.timedelta(days=7)
         items = [x for x in all_items if x[0] < wk_end]
 
-    if args.clear_past:
+    cutoff = None
+    if clear_past:
         try:
-            cutoff = datetime.date.fromisoformat(args.before) if args.before else datetime.date.today()
+            cutoff = datetime.date.fromisoformat(before) if before else datetime.date.today()
         except ValueError:
-            sys.exit(f"Неверная дата в --before: {args.before} (нужен формат ГГГГ-ММ-ДД)")
+            sys.exit(f"Неверная дата в --before: {before} (нужен формат ГГГГ-ММ-ДД)")
 
-    if args.dry_run:
+    if dry_run:
         runs  = sum(1 for _,_,w in items if w["sportType"]["sportTypeKey"] == "running")
         strs  = sum(1 for _,_,w in items if w["sportType"]["sportTypeKey"] == "strength_training")
         cross = len(items) - runs - strs
@@ -282,18 +281,18 @@ def main():
         last = items[-1][2]
         print("### ФИНАЛ", last["workoutName"], "\nJSON:",
               json.dumps(last, ensure_ascii=False, indent=1)[:800], "...")
-        return
+        return {"dry_run": True, "count": len(items)}
 
-    garth = connect(args.account)
+    garth = connect(account, password=password, mfa_prompt=mfa_prompt)
     def post(p, body): return garth.connectapi(p, method="POST", json=body)
     def get(p):        return garth.connectapi(p)
     def delete(p):     return garth.connectapi(p, method="DELETE")
 
-    if args.clear or args.clear_past:
+    if clear or clear_past:
         plan_dates = {name: d for d, name, _ in all_items}  # всегда полный план, независимо от --test
         lst = get("/workout-service/workouts?start=0&limit=999") or []
         mine = [w for w in lst if str(w.get("workoutName","")).startswith(tag)]
-        if args.clear_past:
+        if clear_past:
             sel, unknown = [], []
             for w in mine:
                 d = plan_dates.get(w.get("workoutName"))
@@ -309,14 +308,17 @@ def main():
             foreign = sum(1 for d, _ in sel if d is None)
             print(f"Найдено с тегом {tag}: {len(mine)}"
                   + (f" (из них {foreign} нет в этом plan.json — возможно, другой план с тем же тегом!)" if foreign else ""))
+        removed = 0
         for d, w in sel:
             try:
                 delete(f"/workout-service/workout/{w['workoutId']}")
                 print(f"  удалено: {(d.isoformat()+'  ') if d else ''}{w['workoutName']}")
+                removed += 1
             except Exception as e:
                 print(f"  FAIL удаления: {w.get('workoutName')} -> {e}")
             time.sleep(0.2)
-        print("Очистка завершена."); return
+        print("Очистка завершена.")
+        return {"cleared": removed}
 
     try:
         existing = [w for w in (get("/workout-service/workouts?start=0&limit=999") or [])
@@ -328,7 +330,7 @@ def main():
         pass
     runs = sum(1 for _,_,w in items if w["sportType"]["sportTypeKey"] == "running")
     print(f"К созданию: {len(items)} (бег {runs}, силовые {len(items)-runs})"
-          f"{' — только первая неделя' if args.test else ''}\n")
+          f"{' — только первая неделя' if test else ''}\n")
     ok = fail = 0
     for d, name, wk in items:
         try:
@@ -341,6 +343,25 @@ def main():
             print(f"FAIL {d.isoformat()}  {name} -> {e}"); fail += 1
     print(f"\nГотово: {ok} создано, {fail} с ошибкой. "
           "Проверь Garmin Connect → Тренировки и Календарь, синхронизируй часы.")
+    return {"ok": ok, "fail": fail}
+
+def main():
+    ap = argparse.ArgumentParser(description="Импорт plan.json в Garmin Connect")
+    ap.add_argument("plan", help="путь к plan.json из калькулятора")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--test", action="store_true", help="только первая неделя плана")
+    ap.add_argument("--clear", action="store_true", help="удалить все тренировки с тегом плана")
+    ap.add_argument("--clear-past", action="store_true",
+                    help="удалить только тренировки с датой раньше сегодняшней")
+    ap.add_argument("--before", metavar="ГГГГ-ММ-ДД",
+                    help="граничная дата для --clear-past (по умолчанию сегодня)")
+    ap.add_argument("--skip-cross", metavar="ТИПЫ", default="",
+                    help="не импортировать заданные кросс-тренировки: sport (ski,pool,bike,fitness) "
+                         "или тип Garmin (cycling,swimming,other) через запятую; 'all' — весь кросс")
+    ap.add_argument("--account", metavar="ЛОГИН",
+                    help="логин Garmin: токен берётся/кладётся в ~/.garth/<логин>")
+    args = ap.parse_args()
+    run_import(**vars(args))
 
 if __name__ == "__main__":
     main()

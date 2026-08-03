@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Полноэкранный фон окна на время сплэша (android:windowBackground у Theme.Runstef.Starting).
+     В отличие от windowSplashScreenAnimatedIcon, обычный windowBackground не проходит через
+     системную/OEM icon-маску (круг и т.п.) — рисуется как есть, поэтому логотип здесь не обрезается.
+     Берём растровый foreground из mipmap (тот же, что использует adaptive-icon), т.к. векторный
+     drawable/ic_launcher_foreground.xml залит белым и на белом фоне не виден. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@android:color/white" />
+    <item android:gravity="center" android:width="96dp" android:height="96dp">
+        <bitmap android:src="@mipmap/ic_launcher_foreground" android:gravity="center" />
+    </item>
+</layer-list>

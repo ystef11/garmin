@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Иконка для системного экрана запуска (androidx.core.splashscreen,
+     windowSplashScreenAnimatedIcon). Берём растровый foreground из mipmap (тот же, что и у
+     adaptive-icon) — векторный drawable/ic_launcher_foreground.xml залит белым и на белом фоне
+     не виден. Добавляем отступ 20% с каждой стороны сверх уже имеющегося в самой иконке,
+     чтобы фигура бегуна не срезалась ни системной анимацией сплэша, ни маской иконки на OEM. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@mipmap/ic_launcher_foreground"
+    android:insetLeft="20%"
+    android:insetTop="20%"
+    android:insetRight="20%"
+    android:insetBottom="20%" />

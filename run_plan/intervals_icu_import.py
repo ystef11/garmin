@@ -176,6 +176,57 @@ def load_plan(path, skip_cross=None):
 
 # ---------- main ----------
 
+def run_import(plan, key="", athlete="", skip_cross="", dry_run=False, clear=False):
+    """Библиотечная точка входа: то же самое, что раньше делал main().
+
+    Возвращает dict со сводкой (ok/count и т.п.). Все сообщения по-прежнему
+    идут через print — вызывающий код может перехватить stdout для лога в GUI.
+    """
+    tag, events, meta = load_plan(plan, (skip_cross or "").split(","))
+    d0 = events[0]["start_date_local"][:10]
+    d1 = events[-1]["start_date_local"][:10]
+    runs = sum(1 for e in events if e["type"] == "Run")
+    strs = sum(1 for e in events if e["type"] == "WeightTraining")
+    cross = len(events) - runs - strs
+    print("План: %s | тег %s" % (meta.get("name", "—"), tag))
+    print("Будет создано: %d (бег %d, силовые %d, кросс %d); %s … %s\n" % (len(events), runs, strs, cross, d0, d1))
+
+    if dry_run:
+        run_ex = next((e for e in events if e["type"] == "Run"), None)
+        if run_ex:
+            print("### БЕГ", run_ex["name"], "\n" + run_ex["description"] + "\n")
+        cx = next((e for e in events if e["type"] not in ("Run", "WeightTraining")), None)
+        if cx:
+            print("### КРОСС", cx["name"], "(%s)" % cx["type"], "\n" + (cx.get("description") or "") + "\n")
+        print("Сухой прогон — ничего не отправлено. Уберите --dry-run для загрузки.")
+        return {"dry_run": True, "count": len(events)}
+
+    if not key or not athlete:
+        sys.exit("Нужны --key и --athlete (или INTERVALS_API_KEY / INTERVALS_ATHLETE_ID). "
+                 "Возьмите их в intervals.icu → Settings → Developer.")
+
+    ath = athlete
+    ev_url = "%s/athlete/%s/events" % (BASE, ath)
+
+    gone = 0
+    if clear:
+        lst = _request("GET", "%s?oldest=%s&newest=%s&category=WORKOUT" % (ev_url, d0, d1), key) or []
+        for e in lst:
+            if str(e.get("name", "")).startswith(tag):
+                _request("DELETE", "%s/%s" % (ev_url, e["id"]), key)
+                gone += 1
+        print("Удалено ранее загруженных событий этого плана: %d" % gone)
+
+    ok = 0
+    for e in events:
+        _request("POST", ev_url, key, e)
+        ok += 1
+        if ok % 10 == 0:
+            print("  создано %d/%d…" % (ok, len(events)))
+    print("Готово: создано %d запланированных тренировок в intervals.icu (%s … %s)." % (ok, d0, d1))
+    return {"ok": ok, "cleared": gone}
+
+
 def main():
     ap = argparse.ArgumentParser(description="Импорт плана в intervals.icu")
     ap.add_argument("plan", help="путь к plan.json")
@@ -189,49 +240,7 @@ def main():
     ap.add_argument("--clear", action="store_true",
                     help="удалить ранее загруженные события этого плана (по тегу и диапазону дат) перед импортом")
     args = ap.parse_args()
-
-    tag, events, meta = load_plan(args.plan, (args.skip_cross or "").split(","))
-    d0 = events[0]["start_date_local"][:10]
-    d1 = events[-1]["start_date_local"][:10]
-    runs = sum(1 for e in events if e["type"] == "Run")
-    strs = sum(1 for e in events if e["type"] == "WeightTraining")
-    cross = len(events) - runs - strs
-    print("План: %s | тег %s" % (meta.get("name", "—"), tag))
-    print("Будет создано: %d (бег %d, силовые %d, кросс %d); %s … %s\n" % (len(events), runs, strs, cross, d0, d1))
-
-    if args.dry_run:
-        run_ex = next((e for e in events if e["type"] == "Run"), None)
-        if run_ex:
-            print("### БЕГ", run_ex["name"], "\n" + run_ex["description"] + "\n")
-        cx = next((e for e in events if e["type"] not in ("Run", "WeightTraining")), None)
-        if cx:
-            print("### КРОСС", cx["name"], "(%s)" % cx["type"], "\n" + (cx.get("description") or "") + "\n")
-        print("Сухой прогон — ничего не отправлено. Уберите --dry-run для загрузки.")
-        return
-
-    if not args.key or not args.athlete:
-        sys.exit("Нужны --key и --athlete (или INTERVALS_API_KEY / INTERVALS_ATHLETE_ID). "
-                 "Возьмите их в intervals.icu → Settings → Developer.")
-
-    ath = args.athlete
-    ev_url = "%s/athlete/%s/events" % (BASE, ath)
-
-    if args.clear:
-        lst = _request("GET", "%s?oldest=%s&newest=%s&category=WORKOUT" % (ev_url, d0, d1), args.key) or []
-        gone = 0
-        for e in lst:
-            if str(e.get("name", "")).startswith(tag):
-                _request("DELETE", "%s/%s" % (ev_url, e["id"]), args.key)
-                gone += 1
-        print("Удалено ранее загруженных событий этого плана: %d" % gone)
-
-    ok = 0
-    for e in events:
-        _request("POST", ev_url, args.key, e)
-        ok += 1
-        if ok % 10 == 0:
-            print("  создано %d/%d…" % (ok, len(events)))
-    print("Готово: создано %d запланированных тренировок в intervals.icu (%s … %s)." % (ok, d0, d1))
+    run_import(**vars(args))
 
 
 if __name__ == "__main__":

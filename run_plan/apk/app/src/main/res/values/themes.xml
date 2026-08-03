@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.Runstef" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- Тема окна на время показа системного экрана запуска (androidx.core.splashscreen).
+         На настоящем API 31+ система рисует сплэш в отдельном окне-оверлее поверх активности —
+         обычный android:windowBackground активности в этот момент не виден (мы наступили на эту
+         грабли ранее), поэтому логотип задаём именно через windowSplashScreenAnimatedIcon —
+         это единственный официально поддерживаемый способ показать своё изображение на этом
+         экране. -->
+    <style name="Theme.Runstef.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@android:color/white</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_icon</item>
+        <item name="postSplashScreenTheme">@style/Theme.Runstef</item>
+    </style>
+</resources>
