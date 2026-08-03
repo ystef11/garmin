@@ -1,7 +1,9 @@
 package com.example.runstef
 
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Bundle
+import android.webkit.WebView
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -71,6 +73,13 @@ class MainActivity : FragmentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Только для debug-сборки (android:debuggable) — позволяет открыть chrome://inspect
+        // на компьютере и посмотреть консоль/DOM WebView прямо на реальном устройстве, где
+        // поведение (в т.ч. кнопка «К текущему дню» в плане) может отличаться от эмулятора.
+        // В release-сборке debuggable=false, поэтому здесь ничего не включится.
+        if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            WebView.setWebContentsDebuggingEnabled(true)
+        }
         // Открываем вкладку «Мои планы» по умолчанию, если есть хотя бы один сохранённый план.
         val hasPlans = PlanRepository(this).listPlans().isNotEmpty()
         setContent {
