@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Scaffold
@@ -68,10 +69,10 @@ fun ToolWebViewScreen(url: String) {
     }
 
     Scaffold(
-        // hideTopBar на этом маршруте всегда true (см. MainActivity/RunstefApp) — не резервируем
-        // ещё раз отступ под статус-бар, иначе вместе с внешним Scaffold получится двойной инсет
-        // и над WebView остаётся пустая полоса.
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        // hideTopBar на этом маршруте всегда true (см. MainActivity/RunstefApp) — внешний Scaffold
+        // там инсеты не резервирует вовсе (WindowInsets(0,0,0,0)), поэтому именно этот, внутренний,
+        // Scaffold отвечает за отступ под статус-бар (иначе контент WebView заезжает под шторку).
+        contentWindowInsets = WindowInsets.statusBars,
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {

@@ -80,7 +80,7 @@ fun ExportScreen(preselectedFilePath: String? = null) {
         }
     }
 
-    var dryRun by rememberSaveable { mutableStateOf(true) }
+    var dryRun by rememberSaveable { mutableStateOf(false) }
     val skipCross = remember { mutableStateOf(setOf<String>()) }
     var tabIndex by rememberSaveable { mutableStateOf(0) }
 
@@ -97,7 +97,7 @@ fun ExportScreen(preselectedFilePath: String? = null) {
             Text("Общие опции", style = MaterialTheme.typography.titleMedium)
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Checkbox(checked = dryRun, onCheckedChange = { dryRun = it })
-                Text("Сухой прогон (ничего не отправлять)")
+                Text("Тестовый прогон (ничего не отправлять)")
             }
             Text("Пропустить кросс:", style = MaterialTheme.typography.bodyMedium)
             CrossTypeChips(selected = skipCross.value, onChange = { skipCross.value = it })
