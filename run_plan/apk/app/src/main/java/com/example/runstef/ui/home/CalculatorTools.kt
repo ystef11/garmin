@@ -43,11 +43,12 @@ data class CalculatorTool(
  *
  * Ключи "run"/"bolt"/"speed"/"heart" — уже используемые инструменты (план/гели/темп/VO2max).
  * Ключи ниже ("zones", "route", "timer", "trophy", "nutrition", "terrain", "calendar",
- * "recovery", "weather") — задел на будущие инструменты сайта run/*.html: сервер сможет
+ * "recovery", "weather") — задел на будущие инструменты сайта run/\*.html: сервер сможет
  * указать один из них в поле "icon" конфига без правки кода приложения. Подбирайте ключ по
  * смыслу нового инструмента; если подходящего нет — сначала добавьте новую пару icon-key →
  * ImageVector сюда, а уже потом ссылайтесь на неё из конфига.
- */
+*/
+
 fun iconForKey(key: String): ImageVector = when (key) {
     "run" -> Icons.AutoMirrored.Filled.DirectionsRun
     "bolt" -> Icons.Filled.Bolt
