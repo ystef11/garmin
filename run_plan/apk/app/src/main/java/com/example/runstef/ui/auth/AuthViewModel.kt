@@ -3,6 +3,7 @@ package com.example.runstef.ui.auth
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import com.example.runstef.security.AuthStore
+import com.example.runstef.security.BiometricAuth
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,9 +29,17 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
         authStore.biometricEnabled = enabled
     }
 
-    /** Первичная настройка ПИН-кода (нет сохранённого ПИН) — сразу разблокирует приложение. */
+    /**
+     * Первичная настройка ПИН-кода (нет сохранённого ПИН) — сразу разблокирует приложение.
+     * Если на устройстве доступна биометрия (сенсор есть и настроен), сразу включаем вход по
+     * ней — это самый частый выбор, и до этой правки пользователь должен был отдельно находить
+     * тумблер в «Настройках»; ПИН при этом всё равно остаётся обязательным запасным вариантом.
+     */
     fun setupPin(pin: String) {
         authStore.setPin(pin)
+        if (BiometricAuth.isAvailable(getApplication())) {
+            authStore.biometricEnabled = true
+        }
         _unlocked.value = true
     }
 

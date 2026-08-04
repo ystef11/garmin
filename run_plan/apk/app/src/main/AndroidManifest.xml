@@ -9,6 +9,9 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <!-- Нужно для автообновления (ApkUpdater): позволяет проверить canRequestPackageInstalls()
+         и корректно запускает системный установщик при скачивании apk с бэка (см. UpdateDialog). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="true"

@@ -21,23 +21,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+/**
+ * Состав экрана строится из [state] (см. HomeViewModel/ConfigRepository) — заголовок, подпись
+ * и список инструментов приходят из конфига (бэк или, если сети/кэша ещё нет, встроенный в
+ * apk fallback), а не захардкожены здесь.
+ */
 @Composable
-fun HomeScreen(onOpenTool: (CalculatorTool) -> Unit) {
+fun HomeScreen(state: HomeUiState, onOpenTool: (CalculatorTool) -> Unit) {
     LazyColumn(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
         item {
             Text(
-                text = "Беговые инструменты",
+                text = state.title,
                 style = MaterialTheme.typography.headlineSmall,
                 modifier = Modifier.padding(bottom = 4.dp)
             )
-            Text(
-                text = "Работают офлайн после первого открытия",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+            if (state.subtitle.isNotBlank()) {
+                Text(
+                    text = state.subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+            }
         }
-        items(calculatorTools) { tool ->
+        items(state.tools) { tool ->
             ToolCard(tool = tool, onClick = { onOpenTool(tool) })
         }
     }

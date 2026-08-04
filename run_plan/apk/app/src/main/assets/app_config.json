@@ -1,0 +1,38 @@
+{
+  "version": "0.0.1",
+  "configUrl": "https://ystef11.github.io/run/android/config.json",
+  "home": {
+    "title": "Беговые инструменты",
+    "subtitle": "Работают офлайн после первого открытия",
+    "items": [
+      {
+        "id": "plan",
+        "title": "Калькулятор беговых планов",
+        "description": "Прогноз цели и построение плана",
+        "icon": "run",
+        "url": "https://ystef11.github.io/run/run_plan_calculator.html"
+      },
+      {
+        "id": "gel",
+        "title": "Калькулятор гелей",
+        "description": "Питание на дистанции",
+        "icon": "bolt",
+        "url": "https://ystef11.github.io/run/gel_calculator.html"
+      },
+      {
+        "id": "pace",
+        "title": "Калькулятор темпа",
+        "description": "Пересчёт темпа и времени",
+        "icon": "speed",
+        "url": "https://ystef11.github.io/run/pace_calculator.html"
+      },
+      {
+        "id": "vo2max",
+        "title": "Тест Купера (VO2max)",
+        "description": "Оценка функциональной готовности",
+        "icon": "heart",
+        "url": "https://ystef11.github.io/run/vo2max_calculator.html"
+      }
+    ]
+  }
+}

@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -40,16 +40,19 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
 import com.example.runstef.data.PlanRepository
+import com.example.runstef.data.VersionCompare
 import com.example.runstef.ui.auth.AuthViewModel
 import com.example.runstef.ui.auth.LockScreen
 import com.example.runstef.ui.export.ExportScreen
+import com.example.runstef.ui.home.DEFAULT_PLAN_URL
 import com.example.runstef.ui.home.HomeScreen
+import com.example.runstef.ui.home.HomeViewModel
 import com.example.runstef.ui.home.ToolWebViewScreen
-import com.example.runstef.ui.home.calculatorTools
 import com.example.runstef.ui.plans.PlanViewScreen
 import com.example.runstef.ui.plans.PlansScreen
 import com.example.runstef.ui.security.SecurityScreen
 import com.example.runstef.ui.theme.RunstefTheme
+import com.example.runstef.ui.update.UpdateAvailableDialog
 
 private sealed class Dest(val route: String, val label: String) {
     data object Home : Dest("home", "Главная")
@@ -85,9 +88,11 @@ class MainActivity : FragmentActivity() {
         setContent {
             RunstefTheme {
                 val authViewModel: AuthViewModel = viewModel()
+                val homeViewModel: HomeViewModel = viewModel()
                 RunstefApp(
                     activity = this,
                     authViewModel = authViewModel,
+                    homeViewModel = homeViewModel,
                     startDestination = if (hasPlans) Dest.Plans.route else Dest.Home.route
                 )
             }
@@ -97,7 +102,12 @@ class MainActivity : FragmentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RunstefApp(activity: FragmentActivity, authViewModel: AuthViewModel, startDestination: String) {
+private fun RunstefApp(
+    activity: FragmentActivity,
+    authViewModel: AuthViewModel,
+    homeViewModel: HomeViewModel,
+    startDestination: String
+) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination
@@ -120,7 +130,7 @@ private fun RunstefApp(activity: FragmentActivity, authViewModel: AuthViewModel,
                     title = { Text("Runstef") },
                     actions = {
                         IconButton(onClick = { navController.navigate("security") }) {
-                            Icon(Icons.Filled.Lock, contentDescription = "Безопасность")
+                            Icon(Icons.Filled.Settings, contentDescription = "Настройки")
                         }
                     }
                 )
@@ -163,7 +173,8 @@ private fun RunstefApp(activity: FragmentActivity, authViewModel: AuthViewModel,
             modifier = Modifier.padding(innerPadding).fillMaxSize()
         ) {
             composable(Dest.Home.route) {
-                HomeScreen(onOpenTool = { tool ->
+                val homeState by homeViewModel.uiState.collectAsState()
+                HomeScreen(state = homeState, onOpenTool = { tool ->
                     navController.navigate("tool/${Uri.encode(tool.url)}")
                 })
             }
@@ -183,8 +194,13 @@ private fun RunstefApp(activity: FragmentActivity, authViewModel: AuthViewModel,
                         navController.navigate("planview?path=${Uri.encode(filePath)}")
                     },
                     onCreatePlan = {
-                        val planTool = calculatorTools.first { it.id == "plan" }
-                        navController.navigate("tool/${Uri.encode(planTool.url)}")
+                        // Список инструментов приходит из конфига (см. HomeViewModel) — если он
+                        // ещё не загрузился или временно не содержит пункт "plan", используем
+                        // тот же fallback-URL, что и во встроенном в apk конфиге.
+                        val planUrl = homeViewModel.uiState.value.tools
+                            .firstOrNull { it.id == "plan" }?.url
+                            ?: DEFAULT_PLAN_URL
+                        navController.navigate("tool/${Uri.encode(planUrl)}")
                     },
                     onOpenUrl = { url ->
                         navController.navigate("tool/${Uri.encode(url)}")
@@ -216,8 +232,31 @@ private fun RunstefApp(activity: FragmentActivity, authViewModel: AuthViewModel,
                 }
             }
             composable("security") {
-                SecurityScreen(authViewModel = authViewModel, onLockNow = { authViewModel.lockNow() })
+                SecurityScreen(
+                    authViewModel = authViewModel,
+                    homeViewModel = homeViewModel,
+                    onLockNow = { authViewModel.lockNow() }
+                )
             }
         }
+    }
+
+    // Диалог автообновления — показывается поверх любого экрана (не привязан к конкретному
+    // маршруту), пока не отклонён, не пропущен либо не запущена установка. «Позже» живёт только
+    // в памяти текущего процесса, «Пропустить эту версию» — сохраняется на диск (см. HomeViewModel).
+    val effectiveConfig by homeViewModel.effectiveConfig.collectAsState()
+    val updateDismissed by homeViewModel.updateDismissed.collectAsState()
+    val skippedVersion by homeViewModel.skippedVersion.collectAsState()
+    val update = effectiveConfig?.update
+    val ownVersion = effectiveConfig?.ownVersion
+    if (update != null && ownVersion != null && !updateDismissed && update.latestVersion != skippedVersion &&
+        VersionCompare.isNewer(update.latestVersion, ownVersion)
+    ) {
+        UpdateAvailableDialog(
+            latestVersion = update.latestVersion,
+            apkUrl = update.apkUrl,
+            onDismiss = { homeViewModel.dismissUpdate() },
+            onSkip = { homeViewModel.skipVersion(update.latestVersion) }
+        )
     }
 }

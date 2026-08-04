@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -110,6 +111,12 @@ fun PlansScreen(
     }
 
     Scaffold(
+        // Внешний Scaffold в MainActivity (см. RunstefApp) уже резервирует отступ под статус-бар
+        // для этого маршрута (передаёт его через innerPadding) — если не занулить здесь, этот,
+        // внутренний Scaffold резервирует его ЕЩЁ РАЗ (contentWindowInsets по умолчанию), из-за
+        // чего над списком планов была лишняя пустая полоса (тот же баг, что уже чинили для
+        // WebView-экранов — см. contentWindowInsets в ToolWebViewScreen/RunstefApp).
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             Box {

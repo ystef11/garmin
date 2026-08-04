@@ -3,13 +3,22 @@ package com.example.runstef.ui.home
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.example.runstef.data.HomeItem
 
-private const val BASE_URL = "https://ystef11.github.io/run/"
+/**
+ * Fallback-URL «Калькулятора беговых планов» — используется в MainActivity для перехода
+ * из «Мои планы» → «+» → «Создать план», если список инструментов из конфига (см.
+ * [HomeViewModel]) ещё не загрузился или временно не содержит пункт "plan" (например,
+ * конфиг с бэка недоступен и локального кэша ещё нет). Совпадает с url пункта "plan" в
+ * assets/app_config.json — при обычной работе используется URL из конфига, не эта константа.
+ */
+const val DEFAULT_PLAN_URL = "https://ystef11.github.io/run/run_plan_calculator.html"
 
-/** Только общедоступные инструменты сайта — раздел «Личный кабинет» намеренно не переносится в приложение. */
+/** Инструмент экрана «Главная» — то же самое, что [HomeItem] с бэка, но с уже разрешённой иконкой. */
 data class CalculatorTool(
     val id: String,
     val title: String,
@@ -18,33 +27,23 @@ data class CalculatorTool(
     val icon: ImageVector
 )
 
-val calculatorTools = listOf(
-    CalculatorTool(
-        id = "plan",
-        title = "Калькулятор беговых планов",
-        subtitle = "Прогноз цели и построение плана",
-        url = BASE_URL + "run_plan_calculator.html",
-        icon = Icons.AutoMirrored.Filled.DirectionsRun
-    ),
-    CalculatorTool(
-        id = "gel",
-        title = "Калькулятор гелей",
-        subtitle = "Питание на дистанции",
-        url = BASE_URL + "gel_calculator.html",
-        icon = Icons.Filled.Bolt
-    ),
-    CalculatorTool(
-        id = "pace",
-        title = "Калькулятор темпа",
-        subtitle = "Пересчёт темпа и времени",
-        url = BASE_URL + "pace_calculator.html",
-        icon = Icons.Filled.Speed
-    ),
-    CalculatorTool(
-        id = "vo2max",
-        title = "Тест Купера (VO2max)",
-        subtitle = "Оценка функциональной готовности",
-        url = BASE_URL + "vo2max_calculator.html",
-        icon = Icons.Filled.MonitorHeart
-    )
+/**
+ * Иконку с бэка нельзя передать как есть — сервер шлёт строковый ключ (см. HomeItem.icon),
+ * здесь он маппится на существующие Icons.*. Неизвестный ключ (например, конфиг с бэка выслал
+ * иконку новее, чем умеет текущая версия приложения) — нейтральная заглушка, чтобы не крашиться.
+ */
+fun iconForKey(key: String): ImageVector = when (key) {
+    "run" -> Icons.AutoMirrored.Filled.DirectionsRun
+    "bolt" -> Icons.Filled.Bolt
+    "speed" -> Icons.Filled.Speed
+    "heart" -> Icons.Filled.MonitorHeart
+    else -> Icons.Filled.Extension
+}
+
+fun HomeItem.toCalculatorTool(): CalculatorTool = CalculatorTool(
+    id = id,
+    title = title,
+    subtitle = description,
+    url = url,
+    icon = iconForKey(icon)
 )
