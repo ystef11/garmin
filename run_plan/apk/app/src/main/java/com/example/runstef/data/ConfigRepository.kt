@@ -57,6 +57,13 @@ private val HARDCODED_FALLBACK = BundledConfig(
                 description = "Оценка функциональной готовности",
                 icon = "heart",
                 url = "https://ystef11.github.io/run/vo2max_calculator.html"
+            ),
+            HomeItem(
+                id = "hr_pace",
+                title = "Темп по пульсовым зонам",
+                description = "Соотношение зон пульса к диапазонам темпа",
+                icon = "zones",
+                url = "https://ystef11.github.io/run/hr_pace_calculator.html"
             )
         )
     )
