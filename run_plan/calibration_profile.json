@@ -1,0 +1,355 @@
+{
+  "meta": {
+    "db": "d:\\Git\\mytest\\garmin\\run_plan\\garmin_running.db",
+    "generated_at": "2026-08-11T23:34:06",
+    "period": [
+      "2024-08-21",
+      "2026-08-11"
+    ],
+    "n_activities": 665,
+    "n_cross_activities": 103,
+    "cross_activities_by_sport": {
+      "strength_training": 43,
+      "swimming": 32,
+      "skiing": 14,
+      "cycling": 14
+    },
+    "threshold_source": "none (TRIMP по %HRR)",
+    "load_params": {
+      "max_hr": 195,
+      "rest_hr": 45,
+      "threshold_hr": null,
+      "sex": "m"
+    },
+    "stimulus_map": {
+      "interval": {
+        "vo2": 0.55,
+        "neuromuscular": 0.3,
+        "threshold": 0.1,
+        "aerobic": 0.05
+      },
+      "threshold": {
+        "threshold": 0.65,
+        "marathon_specific": 0.15,
+        "aerobic": 0.15,
+        "vo2": 0.05
+      },
+      "long": {
+        "endurance": 0.45,
+        "marathon_specific": 0.3,
+        "aerobic": 0.25
+      },
+      "easy": {
+        "aerobic": 0.85,
+        "endurance": 0.15
+      },
+      "mixed": {
+        "aerobic": 0.5,
+        "endurance": 0.25,
+        "threshold": 0.25
+      },
+      "unknown": {
+        "aerobic": 0.5,
+        "endurance": 0.5
+      }
+    }
+  },
+  "axes": {
+    "aerobic": {
+      "ok": true,
+      "tau_adapt_days": 34.8,
+      "tau_fatigue_days": 2.0,
+      "k1": 1.1e-05,
+      "k2": -8.6e-05,
+      "baseline_ef": 1.0843,
+      "r2": 0.002,
+      "n_points": 393,
+      "hit_bound": true,
+      "source_types": [
+        "easy"
+      ],
+      "seasonal": {
+        "applied": true,
+        "peak_around": "20.08",
+        "trough_around": "16.12",
+        "drop_peak_to_trough_pct": 20.3,
+        "note": "EF в среднем ниже своего годового пика на ~20.3% в районе 16.12 (вероятно погода/покрытие, не потеря формы) — фит tau_adapt/tau_fatigue ниже использует EF ПОСЛЕ вычитания этого сезонного эффекта."
+      }
+    },
+    "endurance": {
+      "ok": true,
+      "tau_adapt_days": 54.8,
+      "tau_fatigue_days": 10.5,
+      "k1": 8.3e-05,
+      "k2": -0.000105,
+      "baseline_ef": 1.0313,
+      "r2": 0.102,
+      "n_points": 71,
+      "hit_bound": false,
+      "source_types": [
+        "long"
+      ],
+      "seasonal": {
+        "applied": true,
+        "peak_around": "27.08",
+        "trough_around": "01.01",
+        "drop_peak_to_trough_pct": 14.6,
+        "note": "EF в среднем ниже своего годового пика на ~14.6% в районе 01.01 (вероятно погода/покрытие, не потеря формы) — фит tau_adapt/tau_fatigue ниже использует EF ПОСЛЕ вычитания этого сезонного эффекта."
+      }
+    },
+    "threshold": {
+      "ok": false,
+      "reason": "недостаточно данных: 4 измерений EF по типу ['threshold'] (нужно >= 12 точек и охват >= 40 дней)",
+      "n_points": 4
+    },
+    "vo2": {
+      "ok": true,
+      "tau_adapt_days": 45.0,
+      "tau_fatigue_days": 2.0,
+      "k1": 0.000138,
+      "k2": 0.000532,
+      "baseline_ef": 1.0983,
+      "r2": 0.163,
+      "n_points": 153,
+      "hit_bound": true,
+      "source_types": [
+        "interval"
+      ],
+      "seasonal": {
+        "applied": true,
+        "peak_around": "20.07",
+        "trough_around": "15.01",
+        "drop_peak_to_trough_pct": 10.2,
+        "note": "EF в среднем ниже своего годового пика на ~10.2% в районе 15.01 (вероятно погода/покрытие, не потеря формы) — фит tau_adapt/tau_fatigue ниже использует EF ПОСЛЕ вычитания этого сезонного эффекта."
+      }
+    }
+  },
+  "recovery_nonlinearity": {
+    "ok": true,
+    "types_used": [
+      "interval",
+      "threshold"
+    ],
+    "tau_base_days": 4.49,
+    "k": 0.0,
+    "p": 4.0,
+    "k_hist": 0.0,
+    "history_window_days": 5,
+    "r2": 0.035,
+    "n_pairs": 147,
+    "note": "k_hist — насколько накопленная за history_window_days ДО тренировки нагрузка той же категории утомления усиливает требуемое восстановление (эффект 'несколько подряд'); k_hist≈0 — в ваших данных эффект кластера не обнаружен, это не то же самое, что 'эффекта нет физиологически' — возможно, мало пар или разброс load недостаточен, чтобы его отличить от шума."
+  },
+  "recovery_nonlinearity_long": {
+    "ok": true,
+    "types_used": [
+      "long"
+    ],
+    "tau_base_days": 9.37,
+    "k": 0.0,
+    "p": 0.5,
+    "k_hist": 0.0,
+    "history_window_days": 5,
+    "r2": -0.0,
+    "n_pairs": 68,
+    "note": "k_hist — насколько накопленная за history_window_days ДО тренировки нагрузка той же категории утомления усиливает требуемое восстановление (эффект 'несколько подряд'); k_hist≈0 — в ваших данных эффект кластера не обнаружен, это не то же самое, что 'эффекта нет физиологически' — возможно, мало пар или разброс load недостаточен, чтобы его отличить от шума."
+  },
+  "recovery_response_readiness": {
+    "ok": true,
+    "metric": "training_readiness_score",
+    "n_points": 548,
+    "breakpoint_load": 72.3,
+    "acute_days": 7,
+    "chronic_days": 28,
+    "baseline_window_days": 14,
+    "r2": 0.1461,
+    "r2_without_acwr": 0.1282,
+    "coefficients": {
+      "const": {
+        "coef": 34.99378,
+        "p": 0.0
+      },
+      "baseline": {
+        "coef": 0.25884,
+        "p": 0.0
+      },
+      "load_below_bp": {
+        "coef": 0.10771,
+        "p": 0.1191
+      },
+      "load_above_bp": {
+        "coef": -0.1141,
+        "p": 0.0
+      },
+      "acwr_minus1": {
+        "coef": -11.51954,
+        "p": 0.0012
+      },
+      "load_above_bp_x_acwr": {
+        "coef": 0.03472,
+        "p": 0.4084
+      }
+    },
+    "note": "load_below_bp обычно не значим (p столбца в coefficients) — ниже порога отклик статистически не отличим от шума дней полного отдыха (проверено отдельно вне этого скрипта: std изменения метрики в дни без тренировки почти совпадает со std ниже порога). load_above_bp — цена нагрузки сегодняшнего дня выше порога. acwr_minus1 — эффект накопленной за неделю нагрузки относительно хронической (Gabbett ACWR), 0 = норма. load_above_bp_x_acwr — взаимодействие, знак/значимость нестабильны при смене спецификации (проверялось) — не основной результат."
+  },
+  "quality_session_spacing": {
+    "interval": {
+      "n": 148,
+      "median_days": 3.0,
+      "p25_days": 2,
+      "p75_days": 5
+    },
+    "threshold": {
+      "n": 3,
+      "median_days": 223,
+      "p25_days": 36,
+      "p75_days": 363
+    },
+    "long": {
+      "n": 70,
+      "median_days": 7.0,
+      "p25_days": 7,
+      "p75_days": 14
+    }
+  },
+  "overload_gaps": {
+    "gap_threshold_days": 10,
+    "acwr_threshold": 1.5,
+    "acute_days": 7,
+    "chronic_days": 28,
+    "median_acwr_overall": 1.06,
+    "gaps": [
+      {
+        "start_date": "2025-11-05",
+        "end_date": "2025-11-16",
+        "gap_days": 12,
+        "acwr_before": 0.9,
+        "elevated_acwr": false
+      }
+    ],
+    "n_gaps": 1,
+    "n_gaps_with_elevated_acwr": 0
+  },
+  "overload_by_category": {
+    "neuromuscular": {
+      "ok": true,
+      "median_acwr": 0.94,
+      "pct_days_elevated": 27.1,
+      "max_acwr": 4.0
+    },
+    "volume": {
+      "ok": true,
+      "median_acwr": 1.02,
+      "pct_days_elevated": 13.0,
+      "max_acwr": 2.49
+    }
+  },
+  "systemic_fatigue": {
+    "ok": true,
+    "metrics": {
+      "hrv_last_night_avg": {
+        "ok": true,
+        "tau_fatigue_days": 1.0,
+        "k": 0.0,
+        "baseline": 55.37,
+        "r2": 0.0,
+        "n_points": 709,
+        "hit_bound": true,
+        "label": "HRV (за ночь)"
+      },
+      "rhr": {
+        "ok": false,
+        "reason": "мало точек (0, нужно >= 20)",
+        "label": "Пульс покоя"
+      },
+      "body_battery_drained": {
+        "ok": true,
+        "tau_fatigue_days": 1.0,
+        "k": 0.056838,
+        "baseline": 46.921,
+        "r2": 0.161,
+        "n_points": 721,
+        "hit_bound": true,
+        "label": "Body Battery, потрачено"
+      },
+      "stress_avg": {
+        "ok": true,
+        "tau_fatigue_days": 1.0,
+        "k": 0.011574,
+        "baseline": 22.649,
+        "r2": 0.032,
+        "n_points": 721,
+        "hit_bound": true,
+        "label": "Стресс, средний"
+      },
+      "training_readiness_score": {
+        "ok": true,
+        "tau_fatigue_days": 2.0,
+        "k": 0.189592,
+        "baseline": 93.534,
+        "r2": 0.432,
+        "n_points": 721,
+        "hit_bound": false,
+        "label": "Training Readiness"
+      },
+      "sleep_score": {
+        "ok": true,
+        "tau_fatigue_days": 1.0,
+        "k": 0.0,
+        "baseline": 85.242,
+        "r2": -0.0,
+        "n_points": 708,
+        "hit_bound": true,
+        "label": "Скор сна"
+      }
+    },
+    "n_wellness_days": 721
+  },
+  "not_calibrated": [
+    "capacity(exp, age) / experienceCapacity / ageAdjustment — не выводится из истории тренировок, нужен внешний вход (стаж, возраст, референсные результаты).",
+    "Веса категорий muscular/neuromuscular/orthopedic в weightedFatiguePenalty — Garmin не различает ЛОКАЛИЗАЦИЮ утомления (крепатура/суставы/ЦНС отдельно не измеряются); полное разделение на все три категории не оценивается этим скриптом. Частично закрыто грубым 2-категорийным разбиением neuromuscular/volume (см. п.5a, recovery_nonlinearity_neuromuscular/_long и overload_by_category) — это прокси, не измерение крепатуры/ЦНС по отдельности. (Категория systemic из той же формулы — см. блок systemic_fatigue ниже, она оценивается по HRV/RHR/Body Battery/стрессу/training readiness, если есть таблица wellness.)",
+    "marathon_specific и strength — либо смешивается с threshold/long по доступным данным (marathon_specific), либо нет измерения производительности в принципе (strength).",
+    "Порог fitness >= порога, при котором окно считается «открытым» (architecture.md §10) — не откалиброван напрямую; overload_penalty частично приближается через ACWR при пропусках (см. overload_gaps), но это не то же самое, что порог окна суперкомпенсации.",
+    "recovery_response_readiness (dose-response по load дня напрямую на Training Readiness) — R² выше, чем у recovery_nonlinearity (0.10-0.15 против ~0.04), но остаётся одномерным по объёму: не учитывает тип тренировки/ось стимула отдельно, только суммарный дневной load. Взаимодействие load_above_bp_x_acwr статистически значимо, но знак нестабилен при смене спецификации — не использовать как единственный источник для dose-response объёма без дополнительной проверки на бóльшей выборке."
+  ],
+  "optimal_volume_response": {
+    "source": "ручной перенос выводов из отдельного чата-анализа отчёта garmin_dashboard.xlsx (не пересчитывается garmin_calibration_fit.py — обновлять руками при повторном анализе)",
+    "analyzed_at": "2026-08-12",
+    "method": "94 недели: связь скользящего 4-недельного объёма (км/нед) и последующего изменения EF (эффективность темп/пульс, после вычитания сезонной составляющей) через месяц",
+    "optimal_rolling_4w_volume_km_per_week": {
+      "range": [
+        50,
+        60
+      ],
+      "note": "лучший последующий рост EF наблюдается при скользящем 4-недельном объёме ~50-60 км/нед"
+    },
+    "overtraining_threshold_km_per_week": {
+      "range": [
+        65,
+        70
+      ],
+      "note": "выше ~65-70 км/нед (скользящий 4-недельный объём) в среднем идёт спад EF через месяц"
+    },
+    "acwr_decline_threshold": {
+      "value": 1.4,
+      "note": "ACWR >= 1.4 в среднем ведёт к падению EF через месяц (более строгий порог, чем общий overload_gaps.acwr_threshold=1.5)"
+    },
+    "observed_overload_episodes": [
+      {
+        "period": "2025-10 -> 2025-11",
+        "description": "пик объёма 346 км/мес (окт.2025) -> обвал 137 км (ноя.2025), ACWR до 2.34",
+        "effect": "падение EF на -0.246 за 4 недели — худший провал за 2 года наблюдений"
+      },
+      {
+        "period": "2026-06 -> 2026-08",
+        "description": "похожий, слабее выраженный эпизод перегрузки",
+        "effect": "аналогичное, но менее выраженное падение EF"
+      }
+    ],
+    "first_year_progress_check": {
+      "period": "2024-08 -> 2025-06",
+      "ef_change": "0.88 -> 1.25 (после вычитания сезонности)",
+      "conclusion": "тренировки давали отчётливый рост эффективности; застой начался позже, во второй год, и совпадает с перегрузками выше, а не с общей неэффективностью тренировок"
+    },
+    "caveat": "не подтверждено скриптом garmin_calibration_fit.py статистически (не formal fit c CI) — это описательный вывод по построенным графикам объём/темп-по-зонам/EF; при появлении новых данных желательно пересчитать заново"
+  }
+}

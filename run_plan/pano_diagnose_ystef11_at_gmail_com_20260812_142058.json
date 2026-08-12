@@ -1,0 +1,820 @@
+{
+  "username": "ystef11@gmail.com",
+  "display_name": "75982422-2cb5-4e81-9f37-b1834d5198bb",
+  "ranges_checked": [
+    [
+      "последние 7 дн.",
+      "2026-08-05",
+      "2026-08-12"
+    ],
+    [
+      "последние 30 дн.",
+      "2026-07-13",
+      "2026-08-12"
+    ],
+    [
+      "последние 90 дн.",
+      "2026-05-14",
+      "2026-08-12"
+    ],
+    [
+      "последние 365 дн.",
+      "2025-08-12",
+      "2026-08-12"
+    ]
+  ],
+  "lactate_threshold_results": [
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 7 дн., sport=RUNNING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-08-05\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 7 дн., sport=RUNNING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?sport=RUNNING",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-08-05\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 7 дн., sport=RUNNING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?sport=RUNNING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-30\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 7 дн., sport=CYCLING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": true,
+      "error": null,
+      "data_preview": "[]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 7 дн., sport=CYCLING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?sport=CYCLING",
+      "ok": true,
+      "empty": true,
+      "error": null,
+      "data_preview": "[]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 7 дн., sport=CYCLING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": true,
+      "error": null,
+      "data_preview": "[]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 7 дн., sport=ALL, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 7 дн., sport=ALL, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?sport=ALL",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?sport=ALL",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 7 дн., sport=ALL, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 7 дн., sport=None, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-08-05\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 7 дн., sport=None, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-08-05\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 7 дн., sport=None, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-08-05/2026-08-12?aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-30\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 7 дн., sport=RUNNING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-08-05\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 7 дн., sport=RUNNING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=RUNNING",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-08-05\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 7 дн., sport=RUNNING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=RUNNING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-30\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 7 дн., sport=CYCLING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 7 дн., sport=CYCLING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=CYCLING",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=CYCLING",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 7 дн., sport=CYCLING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 7 дн., sport=ALL, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 7 дн., sport=ALL, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=ALL",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=ALL",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 7 дн., sport=ALL, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 7 дн., sport=None, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-08-05\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 7 дн., sport=None, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-08-05\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 7 дн., sport=None, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-08-05/2026-08-12?aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-30\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 30 дн., sport=RUNNING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-26\", \"until\": \"2026-07-26\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-31\", \"until\": \"2026-07-31\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-07-31\"}, {\"from\": \"2026-08-04\", \"until\": \"2026-08-04\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 30 дн., sport=RUNNING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?sport=RUNNING",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-26\", \"until\": \"2026-07-26\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-31\", \"until\": \"2026-07-31\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-07-31\"}, {\"from\": \"2026-08-04\", \"until\": \"2026-08-04\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 30 дн., sport=RUNNING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?sport=RUNNING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-23\", \"until\": \"2026-07-29\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-30\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 30 дн., sport=CYCLING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": true,
+      "error": null,
+      "data_preview": "[]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 30 дн., sport=CYCLING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?sport=CYCLING",
+      "ok": true,
+      "empty": true,
+      "error": null,
+      "data_preview": "[]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 30 дн., sport=CYCLING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": true,
+      "error": null,
+      "data_preview": "[]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 30 дн., sport=ALL, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 30 дн., sport=ALL, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?sport=ALL",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?sport=ALL",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 30 дн., sport=ALL, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 30 дн., sport=None, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-26\", \"until\": \"2026-07-26\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-31\", \"until\": \"2026-07-31\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-07-31\"}, {\"from\": \"2026-08-04\", \"until\": \"2026-08-04\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 30 дн., sport=None, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-26\", \"until\": \"2026-07-26\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-31\", \"until\": \"2026-07-31\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-07-31\"}, {\"from\": \"2026-08-04\", \"until\": \"2026-08-04\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 30 дн., sport=None, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-07-13/2026-08-12?aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-23\", \"until\": \"2026-07-29\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-30\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 30 дн., sport=RUNNING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-26\", \"until\": \"2026-07-26\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-31\", \"until\": \"2026-07-31\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-31\"}, {\"from\": \"2026-08-…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 30 дн., sport=RUNNING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=RUNNING",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-26\", \"until\": \"2026-07-26\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-31\", \"until\": \"2026-07-31\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-31\"}, {\"from\": \"2026-08-…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 30 дн., sport=RUNNING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=RUNNING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-23\", \"until\": \"2026-07-29\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-30\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 30 дн., sport=CYCLING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 30 дн., sport=CYCLING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=CYCLING",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=CYCLING",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 30 дн., sport=CYCLING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 30 дн., sport=ALL, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 30 дн., sport=ALL, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=ALL",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=ALL",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 30 дн., sport=ALL, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 30 дн., sport=None, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-26\", \"until\": \"2026-07-26\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-31\", \"until\": \"2026-07-31\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-31\"}, {\"from\": \"2026-08-…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 30 дн., sport=None, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-26\", \"until\": \"2026-07-26\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-31\", \"until\": \"2026-07-31\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-31\"}, {\"from\": \"2026-08-…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 30 дн., sport=None, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-07-13/2026-08-12?aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-07-23\", \"until\": \"2026-07-29\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-30\", \"until\": \"2026-08-05\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-08-05\"}]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 90 дн., sport=RUNNING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-05-23\", \"until\": \"2026-05-23\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-05-23\"}, {\"from\": \"2026-06-21\", \"until\": \"2026-06-21\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-06-21\"}, {\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-26\", \"until\": \"2026-07-26\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 90 дн., sport=RUNNING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?sport=RUNNING",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-05-23\", \"until\": \"2026-05-23\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-05-23\"}, {\"from\": \"2026-06-21\", \"until\": \"2026-06-21\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-06-21\"}, {\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-26\", \"until\": \"2026-07-26\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 90 дн., sport=RUNNING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?sport=RUNNING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-05-21\", \"until\": \"2026-05-27\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-05-23\"}, {\"from\": \"2026-06-18\", \"until\": \"2026-06-24\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-06-21\"}, {\"from\": \"2026-07-23\", \"until\": \"2026-07-29\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-30\", \"until\": \"2026-08-05\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 90 дн., sport=CYCLING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": true,
+      "error": null,
+      "data_preview": "[]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 90 дн., sport=CYCLING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?sport=CYCLING",
+      "ok": true,
+      "empty": true,
+      "error": null,
+      "data_preview": "[]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 90 дн., sport=CYCLING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": true,
+      "error": null,
+      "data_preview": "[]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 90 дн., sport=ALL, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 90 дн., sport=ALL, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?sport=ALL",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?sport=ALL",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 90 дн., sport=ALL, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 90 дн., sport=None, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-05-23\", \"until\": \"2026-05-23\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-05-23\"}, {\"from\": \"2026-06-21\", \"until\": \"2026-06-21\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-06-21\"}, {\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-26\", \"until\": \"2026-07-26\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 90 дн., sport=None, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-05-23\", \"until\": \"2026-05-23\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-05-23\"}, {\"from\": \"2026-06-21\", \"until\": \"2026-06-21\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-06-21\"}, {\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-26\", \"until\": \"2026-07-26\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 90 дн., sport=None, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2026-05-14/2026-08-12?aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-05-21\", \"until\": \"2026-05-27\", \"series\": \"running\", \"value\": 180.0, \"updatedDate\": \"2026-05-23\"}, {\"from\": \"2026-06-18\", \"until\": \"2026-06-24\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-06-21\"}, {\"from\": \"2026-07-23\", \"until\": \"2026-07-29\", \"series\": \"running\", \"value\": 178.0, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-30\", \"until\": \"2026-08-05\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 90 дн., sport=RUNNING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-05-23\", \"until\": \"2026-05-23\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-05-23\"}, {\"from\": \"2026-06-21\", \"until\": \"2026-06-21\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-06-21\"}, {\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 90 дн., sport=RUNNING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=RUNNING",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-05-23\", \"until\": \"2026-05-23\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-05-23\"}, {\"from\": \"2026-06-21\", \"until\": \"2026-06-21\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-06-21\"}, {\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 90 дн., sport=RUNNING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=RUNNING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-05-21\", \"until\": \"2026-05-27\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-05-23\"}, {\"from\": \"2026-06-18\", \"until\": \"2026-06-24\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-06-21\"}, {\"from\": \"2026-07-23\", \"until\": \"2026-07-29\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 90 дн., sport=CYCLING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 90 дн., sport=CYCLING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=CYCLING",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=CYCLING",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 90 дн., sport=CYCLING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 90 дн., sport=ALL, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 90 дн., sport=ALL, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=ALL",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=ALL",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 90 дн., sport=ALL, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 90 дн., sport=None, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-05-23\", \"until\": \"2026-05-23\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-05-23\"}, {\"from\": \"2026-06-21\", \"until\": \"2026-06-21\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-06-21\"}, {\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 90 дн., sport=None, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-05-23\", \"until\": \"2026-05-23\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-05-23\"}, {\"from\": \"2026-06-21\", \"until\": \"2026-06-21\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-06-21\"}, {\"from\": \"2026-07-25\", \"until\": \"2026-07-25\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-25\"}, {\"from\": \"2026-07-…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 90 дн., sport=None, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2026-05-14/2026-08-12?aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2026-05-21\", \"until\": \"2026-05-27\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-05-23\"}, {\"from\": \"2026-06-18\", \"until\": \"2026-06-24\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-06-21\"}, {\"from\": \"2026-07-23\", \"until\": \"2026-07-29\", \"series\": \"running\", \"value\": 0.39999888000000006, \"updatedDate\": \"2026-07-26\"}, {\"from\": \"2026-07-…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 365 дн., sport=RUNNING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2025-08-19\", \"until\": \"2025-08-19\", \"series\": \"running\", \"value\": 173.0, \"updatedDate\": \"2025-08-19\"}, {\"from\": \"2025-09-07\", \"until\": \"2025-09-07\", \"series\": \"running\", \"value\": 175.0, \"updatedDate\": \"2025-09-07\"}, {\"from\": \"2025-09-21\", \"until\": \"2025-09-21\", \"series\": \"running\", \"value\": 175.0, \"updatedDate\": \"2025-09-21\"}, {\"from\": \"2025-10-05\", \"until\": \"2025-10-05\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 365 дн., sport=RUNNING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?sport=RUNNING",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2025-08-19\", \"until\": \"2025-08-19\", \"series\": \"running\", \"value\": 173.0, \"updatedDate\": \"2025-08-19\"}, {\"from\": \"2025-09-07\", \"until\": \"2025-09-07\", \"series\": \"running\", \"value\": 175.0, \"updatedDate\": \"2025-09-07\"}, {\"from\": \"2025-09-21\", \"until\": \"2025-09-21\", \"series\": \"running\", \"value\": 175.0, \"updatedDate\": \"2025-09-21\"}, {\"from\": \"2025-10-05\", \"until\": \"2025-10-05\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 365 дн., sport=RUNNING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?sport=RUNNING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2025-08-14\", \"until\": \"2025-08-20\", \"series\": \"running\", \"value\": 173.0, \"updatedDate\": \"2025-08-19\"}, {\"from\": \"2025-09-04\", \"until\": \"2025-09-10\", \"series\": \"running\", \"value\": 175.0, \"updatedDate\": \"2025-09-07\"}, {\"from\": \"2025-09-18\", \"until\": \"2025-09-24\", \"series\": \"running\", \"value\": 175.0, \"updatedDate\": \"2025-09-21\"}, {\"from\": \"2025-10-02\", \"until\": \"2025-10-08\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 365 дн., sport=CYCLING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": true,
+      "error": null,
+      "data_preview": "[]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 365 дн., sport=CYCLING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?sport=CYCLING",
+      "ok": true,
+      "empty": true,
+      "error": null,
+      "data_preview": "[]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 365 дн., sport=CYCLING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": true,
+      "error": null,
+      "data_preview": "[]"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 365 дн., sport=ALL, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 365 дн., sport=ALL, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?sport=ALL",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?sport=ALL",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 365 дн., sport=ALL, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 365 дн., sport=None, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2025-08-19\", \"until\": \"2025-08-19\", \"series\": \"running\", \"value\": 173.0, \"updatedDate\": \"2025-08-19\"}, {\"from\": \"2025-09-07\", \"until\": \"2025-09-07\", \"series\": \"running\", \"value\": 175.0, \"updatedDate\": \"2025-09-07\"}, {\"from\": \"2025-09-21\", \"until\": \"2025-09-21\", \"series\": \"running\", \"value\": 175.0, \"updatedDate\": \"2025-09-21\"}, {\"from\": \"2025-10-05\", \"until\": \"2025-10-05\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 365 дн., sport=None, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2025-08-19\", \"until\": \"2025-08-19\", \"series\": \"running\", \"value\": 173.0, \"updatedDate\": \"2025-08-19\"}, {\"from\": \"2025-09-07\", \"until\": \"2025-09-07\", \"series\": \"running\", \"value\": 175.0, \"updatedDate\": \"2025-09-07\"}, {\"from\": \"2025-09-21\", \"until\": \"2025-09-21\", \"series\": \"running\", \"value\": 175.0, \"updatedDate\": \"2025-09-21\"}, {\"from\": \"2025-10-05\", \"until\": \"2025-10-05\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 365 дн., sport=None, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2025-08-12/2026-08-12?aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2025-08-14\", \"until\": \"2025-08-20\", \"series\": \"running\", \"value\": 173.0, \"updatedDate\": \"2025-08-19\"}, {\"from\": \"2025-09-04\", \"until\": \"2025-09-10\", \"series\": \"running\", \"value\": 175.0, \"updatedDate\": \"2025-09-07\"}, {\"from\": \"2025-09-18\", \"until\": \"2025-09-24\", \"series\": \"running\", \"value\": 175.0, \"updatedDate\": \"2025-09-21\"}, {\"from\": \"2025-10-02\", \"until\": \"2025-10-08\", \"series\": \"run…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 365 дн., sport=RUNNING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2025-08-19\", \"until\": \"2025-08-19\", \"series\": \"running\", \"value\": 0.39444334000000003, \"updatedDate\": \"2025-08-19\"}, {\"from\": \"2025-09-07\", \"until\": \"2025-09-07\", \"series\": \"running\", \"value\": 0.39444334000000003, \"updatedDate\": \"2025-09-07\"}, {\"from\": \"2025-09-21\", \"until\": \"2025-09-21\", \"series\": \"running\", \"value\": 0.3888878, \"updatedDate\": \"2025-09-21\"}, {\"from\": \"2025-10-05\", \"unti…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 365 дн., sport=RUNNING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=RUNNING",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2025-08-19\", \"until\": \"2025-08-19\", \"series\": \"running\", \"value\": 0.39444334000000003, \"updatedDate\": \"2025-08-19\"}, {\"from\": \"2025-09-07\", \"until\": \"2025-09-07\", \"series\": \"running\", \"value\": 0.39444334000000003, \"updatedDate\": \"2025-09-07\"}, {\"from\": \"2025-09-21\", \"until\": \"2025-09-21\", \"series\": \"running\", \"value\": 0.3888878, \"updatedDate\": \"2025-09-21\"}, {\"from\": \"2025-10-05\", \"unti…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 365 дн., sport=RUNNING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=RUNNING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2025-08-14\", \"until\": \"2025-08-20\", \"series\": \"running\", \"value\": 0.39444334000000003, \"updatedDate\": \"2025-08-19\"}, {\"from\": \"2025-09-04\", \"until\": \"2025-09-10\", \"series\": \"running\", \"value\": 0.39444334000000003, \"updatedDate\": \"2025-09-07\"}, {\"from\": \"2025-09-18\", \"until\": \"2025-09-24\", \"series\": \"running\", \"value\": 0.3888878, \"updatedDate\": \"2025-09-21\"}, {\"from\": \"2025-10-02\", \"unti…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 365 дн., sport=CYCLING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 365 дн., sport=CYCLING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=CYCLING",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=CYCLING",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 365 дн., sport=CYCLING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 365 дн., sport=ALL, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 365 дн., sport=ALL, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=ALL",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=ALL",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 365 дн., sport=ALL, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 365 дн., sport=None, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?aggregation=daily&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2025-08-19\", \"until\": \"2025-08-19\", \"series\": \"running\", \"value\": 0.39444334000000003, \"updatedDate\": \"2025-08-19\"}, {\"from\": \"2025-09-07\", \"until\": \"2025-09-07\", \"series\": \"running\", \"value\": 0.39444334000000003, \"updatedDate\": \"2025-09-07\"}, {\"from\": \"2025-09-21\", \"until\": \"2025-09-21\", \"series\": \"running\", \"value\": 0.3888878, \"updatedDate\": \"2025-09-21\"}, {\"from\": \"2025-10-05\", \"unti…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 365 дн., sport=None, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2025-08-19\", \"until\": \"2025-08-19\", \"series\": \"running\", \"value\": 0.39444334000000003, \"updatedDate\": \"2025-08-19\"}, {\"from\": \"2025-09-07\", \"until\": \"2025-09-07\", \"series\": \"running\", \"value\": 0.39444334000000003, \"updatedDate\": \"2025-09-07\"}, {\"from\": \"2025-09-21\", \"until\": \"2025-09-21\", \"series\": \"running\", \"value\": 0.3888878, \"updatedDate\": \"2025-09-21\"}, {\"from\": \"2025-10-05\", \"unti…"
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 365 дн., sport=None, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2025-08-12/2026-08-12?aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"from\": \"2025-08-14\", \"until\": \"2025-08-20\", \"series\": \"running\", \"value\": 0.39444334000000003, \"updatedDate\": \"2025-08-19\"}, {\"from\": \"2025-09-04\", \"until\": \"2025-09-10\", \"series\": \"running\", \"value\": 0.39444334000000003, \"updatedDate\": \"2025-09-07\"}, {\"from\": \"2025-09-18\", \"until\": \"2025-09-24\", \"series\": \"running\", \"value\": 0.3888878, \"updatedDate\": \"2025-09-21\"}, {\"from\": \"2025-10-02\", \"unti…"
+    },
+    {
+      "label": "v5 latestLactateThreshold",
+      "path": "/biometric-service/biometric/latestLactateThreshold",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"userProfilePK\": 113039076, \"version\": 1785944988428, \"calendarDate\": \"2026-08-05T20:49:48.371\", \"sequence\": 1785944988428, \"speed\": 0.39999888000000006, \"hearRate\": null, \"heartRateCycling\": null, \"rowSpeed\": null, \"heartRateRowing\": null}, {\"userProfilePK\": 113039076, \"version\": 1785944988428, \"calendarDate\": \"2026-08-05T20:49:48.371\", \"sequence\": 1785944988428, \"speed\": null, \"hearRate\": 178,…"
+    },
+    {
+      "label": "v1 metrics-service/lactatethreshold (последний ряд)",
+      "path": "/metrics-service/metrics/lactatethreshold?startDate=2025-08-12&endDate=2026-08-12",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 404 Client Error: Not Found for url: https://connectapi.garmin.com/metrics-service/metrics/lactatethreshold?startDate=2025-08-12&endDate=2026-08-12",
+      "data_preview": null
+    },
+    {
+      "label": "v2 metrics-service/latest/lactatethreshold",
+      "path": "/metrics-service/metrics/latest/lactatethreshold?startDate=2025-08-12&endDate=2026-08-12",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 404 Client Error: Not Found for url: https://connectapi.garmin.com/metrics-service/metrics/latest/lactatethreshold?startDate=2025-08-12&endDate=2026-08-12",
+      "data_preview": null
+    }
+  ]
+}
