@@ -1,0 +1,229 @@
+{
+  "username": "yurlovama@gmail.com",
+  "display_name": "115e5442-4a84-472d-9b27-2e5db76cc82e",
+  "ranges_checked": [
+    [
+      "последние 750 дн.",
+      "2024-07-23",
+      "2026-08-12"
+    ]
+  ],
+  "lactate_threshold_results": [
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 750 дн., sport=RUNNING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 750 дн., sport=RUNNING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=RUNNING",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=RUNNING",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 750 дн., sport=RUNNING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=RUNNING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=RUNNING&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 750 дн., sport=CYCLING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 750 дн., sport=CYCLING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=CYCLING",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=CYCLING",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 750 дн., sport=CYCLING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 750 дн., sport=ALL, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 750 дн., sport=ALL, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=ALL",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=ALL",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 750 дн., sport=ALL, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 750 дн., sport=None, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 750 дн., sport=None, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdHeartRate [последние 750 дн., sport=None, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdHeartRate/range/2024-07-23/2026-08-12?aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 750 дн., sport=RUNNING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 750 дн., sport=RUNNING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=RUNNING",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=RUNNING",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 750 дн., sport=RUNNING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=RUNNING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=RUNNING&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 750 дн., sport=CYCLING, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=CYCLING&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 750 дн., sport=CYCLING, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=CYCLING",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=CYCLING",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 750 дн., sport=CYCLING, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=CYCLING&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 750 дн., sport=ALL, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=ALL&aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 750 дн., sport=ALL, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=ALL",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=ALL",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 750 дн., sport=ALL, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?sport=ALL&aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 750 дн., sport=None, aggregation=daily&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?aggregation=daily&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?aggregation=daily&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 750 дн., sport=None, без aggregation-параметров]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12",
+      "data_preview": null
+    },
+    {
+      "label": "v3/v4 lactateThresholdSpeed [последние 750 дн., sport=None, aggregation=weekly&aggregationStrategy=LATEST]",
+      "path": "/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?aggregation=weekly&aggregationStrategy=LATEST",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 400 Client Error: Bad Request for url: https://connectapi.garmin.com/biometric-service/stats/lactateThresholdSpeed/range/2024-07-23/2026-08-12?aggregation=weekly&aggregationStrategy=LATEST",
+      "data_preview": null
+    },
+    {
+      "label": "v5 latestLactateThreshold",
+      "path": "/biometric-service/biometric/latestLactateThreshold",
+      "ok": true,
+      "empty": false,
+      "error": null,
+      "data_preview": "[{\"userProfilePK\": 118052133, \"version\": 1783510601364, \"calendarDate\": \"2026-07-08T16:36:41.329\", \"sequence\": 1783510601364, \"speed\": 0.31944355, \"hearRate\": null, \"heartRateCycling\": null, \"rowSpeed\": null, \"heartRateRowing\": null}, {\"userProfilePK\": 118052133, \"version\": 1783510601364, \"calendarDate\": \"2026-07-08T16:36:41.329\", \"sequence\": 1783510601364, \"speed\": null, \"hearRate\": 183, \"heartRa…"
+    },
+    {
+      "label": "v1 metrics-service/lactatethreshold (последний ряд)",
+      "path": "/metrics-service/metrics/lactatethreshold?startDate=2024-07-23&endDate=2026-08-12",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 404 Client Error: Not Found for url: https://connectapi.garmin.com/metrics-service/metrics/lactatethreshold?startDate=2024-07-23&endDate=2026-08-12",
+      "data_preview": null
+    },
+    {
+      "label": "v2 metrics-service/latest/lactatethreshold",
+      "path": "/metrics-service/metrics/latest/lactatethreshold?startDate=2024-07-23&endDate=2026-08-12",
+      "ok": false,
+      "empty": true,
+      "error": "GarthHTTPError: Error in request: 404 Client Error: Not Found for url: https://connectapi.garmin.com/metrics-service/metrics/latest/lactatethreshold?startDate=2024-07-23&endDate=2026-08-12",
+      "data_preview": null
+    }
+  ]
+}

@@ -383,13 +383,42 @@ def fetch_lactate_threshold_range(garth, start_date, end_date):
     latestLactateThreshold (только ПОСЛЕДНЕЕ значение, не ряд по датам, лучше чем ничего).
     Если всё равно пусто — таблица останется пустой и калибровка откатится на TRIMP/ручной
     --threshold-hr (см. --dump-wellness-raw, чтобы посмотреть сырой ответ этих эндпоинтов
-    на своём аккаунте, если понадобится поправить парсинг под другой формат ответа)."""
-    hr_path = (f"/biometric-service/stats/lactateThresholdHeartRate/range/{start_date}/{end_date}"
-               f"?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST")
-    speed_path = (f"/biometric-service/stats/lactateThresholdSpeed/range/{start_date}/{end_date}"
-                  f"?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST")
-    hr_data = _safe_get(garth, hr_path)
-    speed_data = _safe_get(garth, speed_path)
+    на своём аккаунте, если понадобится поправить парсинг под другой формат ответа).
+
+    ИСПРАВЛЕНО-2 (диагностика garmin_pano_diagnose.py, 2026-08-12, аккаунт с ~2-летней
+    историей): /range/{start}/{end} отдаёт 400 Bad Request, если ширина диапазона больше
+    ~1 года (сам путь и параметры верные — при --days 365 всё работало, при --days 750
+    падало 400 на КАЖДОМ варианте sport/aggregation). Раньше 400 просто гасился в
+    _safe_get() -> None -> пустой результат по всему периоду, хотя часть истории внутри
+    более коротких кусков диапазона реально была доступна. Теперь бьём запрошенный
+    период на кусочки по <=365 дней и объединяем результат по каждому кусочку отдельно
+    (см. _year_chunks ниже) — так же, как если бы calibration_fit гонял --days 365
+    несколько раз подряд с разными --start-date/--end-date."""
+
+    def _chunks(start_date, end_date, max_days=365):
+        d0 = datetime.date.fromisoformat(start_date)
+        d1 = datetime.date.fromisoformat(end_date)
+        cur = d0
+        step = datetime.timedelta(days=max_days)
+        while cur <= d1:
+            chunk_end = min(cur + step, d1)
+            yield cur.isoformat(), chunk_end.isoformat()
+            cur = chunk_end + datetime.timedelta(days=1)
+
+    def _fetch_range(metric_path):
+        merged = []
+        for c_start, c_end in _chunks(start_date, end_date):
+            path = (f"/biometric-service/stats/{metric_path}/range/{c_start}/{c_end}"
+                    f"?sport=RUNNING&aggregation=daily&aggregationStrategy=LATEST")
+            data = _safe_get(garth, path)
+            if isinstance(data, list):
+                merged.extend(data)
+            elif isinstance(data, dict):
+                merged.append(data)
+        return merged
+
+    hr_data = _fetch_range("lactateThresholdHeartRate")
+    speed_data = _fetch_range("lactateThresholdSpeed")
 
     def _rows(data):
         if not data:
@@ -432,16 +461,37 @@ def fetch_lactate_threshold_range(garth, start_date, end_date):
         return out
 
     latest = _safe_get(garth, "/biometric-service/biometric/latestLactateThreshold")
-    if isinstance(latest, dict):
-        hr = latest.get("lactateThresholdHeartRate") or _deep_find_key(latest, "lactateThresholdHeartRate")
-        speed = latest.get("lactateThresholdSpeed") or _deep_find_key(latest, "lactateThresholdSpeed")
-        date_str = latest.get("calendarDate") or end_date
-        if hr or speed:
-            return {date_str: {
-                "threshold_hr": hr,
-                "threshold_pace_s_per_km": s_per_km(speed) if speed else None,
-                "source": "biometric-service/biometric/latestLactateThreshold (только последнее значение, не временной ряд)",
-            }}
+    # ИСПРАВЛЕНО-3 (та же диагностика 2026-08-12): реальный ответ — СПИСОК записей
+    # (не dict, старая проверка `isinstance(latest, dict)` всегда была False и этот
+    # fallback никогда не срабатывал), причём бег/вело/греблю Garmin отдаёт РАЗНЫМИ
+    # записями с разными calendarDate, например:
+    #   [{"calendarDate": "...", "speed": 0.319, "hearRate": null, "heartRateCycling": null, ...},
+    #    {"calendarDate": "...", "speed": null, "hearRate": 183, "heartRateCycling": null, ...}]
+    # Поле для бегового пульса называется именно "hearRate" (без опечатки на нашей
+    # стороне — так у Garmin), поле для скорости — просто "speed" (не
+    # "lactateThresholdSpeed"). heartRateCycling/rowSpeed/heartRateRowing относятся к
+    # другим видам спорта и не используются (калькулятор — только бег).
+    latest_rows = latest if isinstance(latest, list) else ([latest] if isinstance(latest, dict) else [])
+    hr = speed = date_str = None
+    for row in latest_rows:
+        if not isinstance(row, dict):
+            continue
+        row_date = row.get("calendarDate")
+        row_hr = row.get("hearRate") or row.get("heartRate") or _deep_find_key(row, "lactateThresholdHeartRate")
+        row_speed = row.get("speed") or _deep_find_key(row, "lactateThresholdSpeed")
+        if row_hr and (hr is None or (row_date or "") > (date_str or "")):
+            hr = row_hr
+            date_str = row_date or date_str
+        if row_speed and (speed is None or (row_date or "") >= (date_str or "")):
+            speed = row_speed
+            date_str = date_str or row_date
+    date_str = date_str or end_date
+    if hr or speed:
+        return {date_str: {
+            "threshold_hr": hr,
+            "threshold_pace_s_per_km": s_per_km(speed) if speed else None,
+            "source": "biometric-service/biometric/latestLactateThreshold (только последнее значение, не временной ряд)",
+        }}
     return {}
 
 
@@ -698,11 +748,26 @@ def fetch_laps(garth, activity_id):
 
 
 def lap_type_key(lap):
+    """ИСПРАВЛЕНО (2026-08-12): реальный ответ /activity-service/activity/{id}/splits
+    ("plain"-источник, который фактически используется почти всегда — см. fetch_laps,
+    "typed"-эндпоинт /typedsplits у Garmin в проверенных активностях не отдавал лапы вовсе)
+    не содержит поля "type" — это была гипотеза под возможный формат typedsplits, которая
+    никогда не подтверждалась на реальных данных. Из-за этого lap_type_key всегда возвращал
+    None, и вся intervals-таблица (4463+ строк) экспортировалась с lap_type=NULL — рабочие
+    отрезки/отдых/разминку/заминку невозможно было отличить программно, только эвристикой
+    по постфактум дистанции/темпу (см. анализ вне этого скрипта, 2026-08-12).
+    Реальное поле — "intensityType" (значения ACTIVE/REST/WARMUP/COOLDOWN, проверено на
+    сырых лапах, см. activity_*_fields_raw.json). Оставляем проверку "type" первой (на
+    случай, если typedsplits когда-то реально заработает и вернёт другую форму), но с
+    фолбэком на intensityType, который РЕАЛЬНО приходит."""
     t = lap.get("type")
     if isinstance(t, dict):
         t = t.get("typeKey") or t.get("key")
-    if isinstance(t, str):
+    if isinstance(t, str) and t:
         return t.upper()
+    intensity = lap.get("intensityType")
+    if isinstance(intensity, str) and intensity:
+        return intensity.upper()
     return None
 
 

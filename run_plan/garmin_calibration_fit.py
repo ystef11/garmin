@@ -413,7 +413,8 @@ def load_activities(db_path):
     con.row_factory = sqlite3.Row
     cols = {row[1] for row in con.execute("PRAGMA table_info(activities)").fetchall()}
     extra = [c for c in ("elevation_gain_m", "elevation_loss_m", "sport", "impact_load",
-                          "difference_body_battery", "manual_activity", "elevation_corrected")
+                          "difference_body_battery", "manual_activity", "elevation_corrected",
+                          "aerobic_training_effect", "anaerobic_training_effect")
              if c in cols]
     select_cols = "activity_id, date, duration_s, distance_m, avg_hr, max_hr, type_guess" + \
                   ("".join(f", {c}" for c in extra))
@@ -425,6 +426,116 @@ def load_activities(db_path):
     """).fetchall()
     con.close()
     return [dict(r) for r in rows]
+
+
+# --- Реконструкция рабочих отрезков внутри качественных тренировок (interval/threshold/mixed) ---
+# см. докстрин analyze_quality_rep_response ниже. lap_type в БД начал реально заполняться только
+# после исправления lap_type_key в garmin_activities_export.py (2026-08-12, поле было "intensityType",
+# не "type") — старые записи intervals (до повторного экспорта за исторический период) всё ещё имеют
+# lap_type=NULL. Поэтому классификация лапа на "рабочий/разминка/отдых" ниже сначала пробует реальный
+# lap_type (ACTIVE/WORK/INTERVAL* -> рабочий, REST/RECOVERY* -> отдых, WARMUP/COOLDOWN -> исключается),
+# а если он NULL — откатывается на ту же эвристику по дистанции/темпу, что использовалась в ручном
+# анализе вне этого скрипта (2026-08-12): первый/последний лап отрезаются как разминка/заминка, если
+# их дистанция заметно (>=1.4x) больше медианной дистанции "внутренних" лапов и превышает 800 м;
+# среди оставшихся лапов "рабочими" считаются те, где distance_m >= REP_MIN_WORK_DISTANCE_M.
+REP_MIN_WORK_DISTANCE_M = 300
+REP_EDGE_RATIO = 1.4
+REP_EDGE_MIN_DISTANCE_M = 800
+REP_THRESHOLD_DURATION_S = 9 * 60  # порог "интервальный vs пороговый" по длительности РАБОЧЕГО отрезка
+
+
+def load_intervals(db_path):
+    con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+    cols = {row[1] for row in con.execute("PRAGMA table_info(intervals)").fetchall()}
+    if not cols:
+        con.close()
+        return {}
+    rows = con.execute("""
+        SELECT activity_id, idx, lap_type, duration_s, distance_m, avg_hr, avg_pace_s_per_km
+        FROM intervals
+        ORDER BY activity_id, idx
+    """).fetchall()
+    con.close()
+    by_activity = {}
+    for r in rows:
+        by_activity.setdefault(r["activity_id"], []).append(dict(r))
+    return by_activity
+
+
+def _lap_role(lap):
+    """ACTIVE / REST / EDGE(warmup-cooldown) / None (неизвестно, эвристика решит по месту)."""
+    lt = lap.get("lap_type")
+    if lt in ("ACTIVE", "WORK", "INTERVAL", "INTERVAL_ACTIVE", "REPEAT"):
+        return "ACTIVE"
+    if lt in ("REST", "RECOVERY", "INTERVAL_REST", "RECOVERY_ACTIVE"):
+        return "REST"
+    if lt in ("WARMUP", "COOLDOWN"):
+        return "EDGE"
+    return None
+
+
+def reconstruct_reps(laps):
+    """Один вызов на активность (список лапов из load_intervals по activity_id). Возвращает
+    None, если рабочие отрезки не распознаны (слишком мало лапов / нет пульса), иначе dict с
+    n_reps / avg_rep_distance_m / avg_rep_duration_s / rep_ef (эффективность = (дистанция/время)/
+    пульс, ТОЛЬКО по рабочим отрезкам — то есть эффективность конкретно во время быстрого куска,
+    а не всей тренировки, которая размывает сигнал разминкой/отдыхом)."""
+    if not laps or len(laps) < 2:
+        return None
+    laps = sorted(laps, key=lambda l: l["idx"])
+    roles = [_lap_role(l) for l in laps]
+
+    if any(r is not None for r in roles):
+        # есть реальная разметка Garmin хотя бы у части лапов — доверяем ей, EDGE/None исключаем
+        # из рабочих (None среди частично типизированной тренировки обычно тоже край/шум)
+        work = [l for l, r in zip(laps, roles) if r == "ACTIVE"]
+    else:
+        # полностью NULL lap_type (старый экспорт до фикса) -> эвристика по дистанции/темпу.
+        # ИСПРАВЛЕНО (2026-08-12, по замечанию пользователя): "дистанция >= порога" одна, без
+        # темпа, засчитывала как "рабочие" длинные медленные лапы (наблюдалось на реальных
+        # активностях: лапы ~900-1000м с темпом 570-700 с/км — это трусца/заглушка внутри
+        # тренировки, НЕ рабочий отрезок, но они длиннее REP_MIN_WORK_DISTANCE_M и проходили
+        # старый фильтр), а также лапы с физически бессмысленным темпом (GPS стоял на месте —
+        # 30-40м за 90-120с, >900 с/км) искажали медиану и статистику. Теперь: (1) такие
+        # "стоп"-лапы выкидываются целиком до любых расчётов; (2) "рабочим" считается лап, у
+        # которого дистанция >= порога И темп не медленнее fastest_pace_в_core * 1.15 — то есть
+        # он должен реально быть одним из самых быстрых кусков тренировки, а не просто длинным.
+        laps = [l for l in laps if not (l.get("avg_pace_s_per_km") and l["avg_pace_s_per_km"] > 900)]
+        laps = [l for l in laps if (l.get("distance_m") or 0) > 0]
+        if len(laps) < 2:
+            return None
+        inner = laps[1:-1] if len(laps) > 2 else laps
+        dists = [l["distance_m"] for l in inner if l.get("distance_m")]
+        if not dists:
+            return None
+        med_inner = statistics.median(dists)
+
+        def is_edge(l):
+            d = l.get("distance_m") or 0
+            return d > REP_EDGE_RATIO * med_inner and d > REP_EDGE_MIN_DISTANCE_M
+
+        start = 1 if len(laps) > 2 and is_edge(laps[0]) else 0
+        end = len(laps) - 1 if len(laps) > 2 and is_edge(laps[-1]) else len(laps)
+        core = laps[start:end]
+        core_paces = [l["avg_pace_s_per_km"] for l in core if l.get("avg_pace_s_per_km")]
+        if not core_paces:
+            return None
+        fastest_pace = min(core_paces)
+        work = [l for l in core if (l.get("distance_m") or 0) >= REP_MIN_WORK_DISTANCE_M
+                and l.get("avg_pace_s_per_km") and l["avg_pace_s_per_km"] <= fastest_pace * 1.15]
+
+    work = [l for l in work if l.get("duration_s") and l.get("distance_m") and l.get("avg_hr")]
+    if not work:
+        return None
+    speeds = [l["distance_m"] / l["duration_s"] for l in work]
+    efs = [s / l["avg_hr"] for s, l in zip(speeds, work)]
+    return {
+        "n_reps": len(work),
+        "avg_rep_distance_m": statistics.mean(l["distance_m"] for l in work),
+        "avg_rep_duration_s": statistics.mean(l["duration_s"] for l in work),
+        "rep_ef": statistics.mean(efs),
+    }
 
 
 def load_wellness(db_path):
@@ -1422,6 +1533,458 @@ def analyze_volume_ef_response(acts, daily_total_load, day0, n_days, grade_adjus
     }
 
 
+def _bin_analysis_generic(x, y, label, delta_key, n_bins=5):
+    """То же самое, что внутренний _bin_analysis в analyze_volume_ef_response, но вынесено на
+    уровень модуля, чтобы analyze_quality_rep_response мог использовать один и тот же способ
+    квантильных корзин + приближённой p-value без копипасты формул."""
+    mask = ~np.isnan(x) & ~np.isnan(y) & (x > 0)
+    x, y = x[mask], y[mask]
+    if len(x) < n_bins * 3:
+        return {"ok": False, "reason": f"недостаточно недель с валидным {label} ({len(x)})"}
+    order = np.argsort(x)
+    x_sorted, y_sorted = x[order], y[order]
+    edges = np.array_split(np.arange(len(x_sorted)), n_bins)
+    bins = []
+    for e in edges:
+        if len(e) == 0:
+            continue
+        bins.append({
+            f"{label}_range": [round(float(x_sorted[e].min()), 2), round(float(x_sorted[e].max()), 2)],
+            f"{label}_mean": round(float(x_sorted[e].mean()), 2),
+            delta_key: round(float(y_sorted[e].mean()), 5),
+            "n_weeks": int(len(e)),
+        })
+    best = max(bins, key=lambda b: b[delta_key])
+    r, p = _pearsonr_approx(x, y)
+    return {"ok": True, "n_weeks": int(len(x)), "bins": bins, "best_bin": best,
+            "correlation_r": r, "correlation_p_approx": p}
+
+
+def _reconstruct_reps_by_activity(acts, intervals_by_activity, quality_types, day0, n_days):
+    """Вынесено из analyze_quality_rep_response (2026-08-17), чтобы build_optimal_targets мог
+    использовать ТОЧНО ту же реконструкцию рабочих отрезков при фильтрации реальных тренировок
+    по best-zone (см. build_optimal_targets) — без копипасты и без риска рассинхронизации логики."""
+    reps_by_activity = {}
+    for a in acts:
+        if a["type_guess"] not in quality_types:
+            continue
+        laps = intervals_by_activity.get(a["activity_id"])
+        if not laps:
+            continue
+        rec = reconstruct_reps(laps)
+        if rec is None:
+            continue
+        idx = (datetime.date.fromisoformat(a["date"]) - day0).days
+        if not (0 <= idx < n_days):
+            continue
+        rec["idx"] = idx
+        rec["date"] = a["date"]
+        rec["activity_id"] = a["activity_id"]
+        rec["aerobic_training_effect"] = a.get("aerobic_training_effect")
+        rec["anaerobic_training_effect"] = a.get("anaerobic_training_effect")
+        reps_by_activity[a["activity_id"]] = rec
+    return reps_by_activity
+
+
+def analyze_quality_rep_response(acts, intervals_by_activity, day0, n_days,
+                                  quality_types=("interval", "threshold", "mixed"),
+                                  rolling_weeks=4, horizon_weeks=4, n_bins=5):
+    """Дозозависимость 'длина/длительность рабочего отрезка и количество повторов -> будущее
+    изменение EF ИМЕННО на рабочих отрезках' (не всей тренировки — см. reconstruct_reps).
+    Отдельно от analyze_volume_ef_response (тот про суммарный объём бега), этот блок смотрит
+    ВНУТРЬ качественных тренировок: сколько было повторов, какой они длины/длительности, и как
+    это соотносится с изменением эффективности бега именно во время быстрых кусков через
+    horizon_weeks недель. Разбивка на 'интервальные' и 'пороговые' — ПО ФАКТИЧЕСКОЙ ДЛИТЕЛЬНОСТИ
+    рабочего отрезка (>= REP_THRESHOLD_DURATION_S = 9 мин -> threshold, иначе -> interval), а НЕ
+    по названию тренировки или Garmin type_guess — по прямому запросу пользователя (2026-08-12),
+    т.к. называние тренировки ('Порог'/'Темп') не гарантирует, что отрезки внутри реально длиннее
+    9 минут (проверено вручную: почти все 'пороговые по названию' у этого атлета были короче).
+    ВАЖНО: если lap_type в БД ещё не переэкспортирован после фикса lap_type_key (см. docstring
+    reconstruct_reps) — данные по факту эвристические (дистанция/темп), не 'настоящая' разметка
+    Garmin; надёжность от этого не идеальная, но методика та же, что валидировалась вручную."""
+    reps_by_activity = _reconstruct_reps_by_activity(acts, intervals_by_activity, quality_types, day0, n_days)
+
+    n_matched = len(reps_by_activity)
+    if n_matched < MIN_POINTS:
+        return {"ok": False, "reason": f"рабочие отрезки восстановлены только у {n_matched} "
+                                        f"качественных тренировок (нужно >= {MIN_POINTS}) — либо "
+                                        f"мало лапов в БД, либо мало тренировок этих типов",
+                "n_matched": n_matched}
+
+    def _run_for_subset(recs, subset_label):
+        if len(recs) < MIN_POINTS:
+            return {"ok": False, "reason": f"мало тренировок в подвыборке '{subset_label}' "
+                                            f"({len(recs)}, нужно >= {MIN_POINTS})", "n_sessions": len(recs)}
+        n_weeks = n_days // 7
+        if n_weeks < 2 * (rolling_weeks + horizon_weeks):
+            return {"ok": False, "reason": f"недостаточно недель охвата ({n_weeks})"}
+
+        def _week_of(idx):
+            return idx // 7
+
+        len_week = np.full(n_weeks, np.nan)
+        dur_week = np.full(n_weeks, np.nan)
+        nrep_week = np.full(n_weeks, np.nan)
+        ef_week = np.full(n_weeks, np.nan)
+        by_week = {}
+        for r in recs:
+            by_week.setdefault(_week_of(r["idx"]), []).append(r)
+        for w, rs in by_week.items():
+            if 0 <= w < n_weeks:
+                len_week[w] = statistics.mean(r["avg_rep_distance_m"] for r in rs)
+                dur_week[w] = statistics.mean(r["avg_rep_duration_s"] for r in rs)
+                nrep_week[w] = statistics.mean(r["n_reps"] for r in rs)
+                ef_week[w] = statistics.mean(r["rep_ef"] for r in rs)
+
+        def _interp_roll(week_arr):
+            have = ~np.isnan(week_arr)
+            if have.sum() < 3:
+                return None
+            filled = np.interp(np.arange(n_weeks), np.flatnonzero(have), week_arr[have])
+            rolled = np.array([
+                np.mean(filled[max(0, w - rolling_weeks + 1): w + 1]) for w in range(n_weeks)
+            ])
+            return rolled
+
+        len_roll, dur_roll, nrep_roll = _interp_roll(len_week), _interp_roll(dur_week), _interp_roll(nrep_week)
+        ef_have = ~np.isnan(ef_week)
+        if ef_have.sum() < MIN_POINTS or len_roll is None:
+            return {"ok": False, "reason": "недостаточно недель с восстановленными отрезками после агрегации",
+                    "n_sessions": len(recs)}
+        ef_filled = np.interp(np.arange(n_weeks), np.flatnonzero(ef_have), ef_week[ef_have])
+
+        valid_w = np.arange(n_weeks - horizon_weeks)
+        delta_ef = ef_filled[valid_w + horizon_weeks] - ef_filled[valid_w]
+
+        out = {"ok": True, "n_sessions": len(recs), "n_real_weeks_with_data": int(ef_have.sum())}
+        for dose_roll, label, key in ((len_roll, "avg_rep_distance_m", "rep_length_m"),
+                                       (dur_roll, "avg_rep_duration_s", "rep_duration_s"),
+                                       (nrep_roll, "n_reps", "n_reps")):
+            dose_w = dose_roll[valid_w]
+            out[key] = _bin_analysis_generic(dose_w, delta_ef, key, "mean_delta_rep_ef_next_weeks", n_bins)
+        return out
+
+    all_recs = list(reps_by_activity.values())
+    interval_recs = [r for r in all_recs if r["avg_rep_duration_s"] < REP_THRESHOLD_DURATION_S]
+    threshold_recs = [r for r in all_recs if r["avg_rep_duration_s"] >= REP_THRESHOLD_DURATION_S]
+
+    return {
+        "ok": True,
+        "method": f"для каждой качественной тренировки (типы {list(quality_types)}) рабочие "
+                  f"отрезки восстанавливаются reconstruct_reps (реальный lap_type, если "
+                  f"переэкспортирован после фикса, иначе эвристика по дистанции/темпу); "
+                  f"'interval' = рабочий отрезок < {REP_THRESHOLD_DURATION_S//60} мин, "
+                  f"'threshold' = >= {REP_THRESHOLD_DURATION_S//60} мин (по факту, не по названию "
+                  f"тренировки); длина/длительность отрезка и число повторов усредняются по неделе, "
+                  f"скользящее окно {rolling_weeks} нед., изменение EF рабочих отрезков — через "
+                  f"{horizon_weeks} нед. вперёд, корзины квантильные по {n_bins}.",
+        "n_quality_activities_total": len([a for a in acts if a["type_guess"] in quality_types]),
+        "n_with_reconstructed_reps": n_matched,
+        "interval_lt_9min": _run_for_subset(interval_recs, "interval(<9 мин)"),
+        "threshold_ge_9min": _run_for_subset(threshold_recs, "threshold(9+ мин)"),
+        "caveat": "то же самое предупреждение, что и у volume_ef_response (квантильные корзины по "
+                  "перекрывающимся неделям, correlation_p_approx не учитывает автокорреляцию) — плюс "
+                  "дополнительный риск для подвыборки threshold_ge_9min: если реальных тренировок "
+                  "9+ минут на рабочий отрезок мало (см. n_sessions), корреляция по интерполированным "
+                  "неделям может быть статистическим артефактом почти без реального сигнала — "
+                  "смотрите на n_sessions и n_real_weeks_with_data, а не только на r/p.",
+    }
+
+
+def _weekly_series_from_acts(acts, day0, n_days, value_fn, types=None, agg="mean"):
+    """Недельная агрегация value_fn(activity) по активностям (опц. отфильтрованным по type_guess),
+    возвращает numpy-массив длиной n_weeks с NaN там, где на неделе нет данных (без интерполяции —
+    её делает вызывающий код, чтобы явно контролировать, где she're заполняется)."""
+    n_weeks = n_days // 7
+    by_week = {}
+    for a in acts:
+        if types is not None and a["type_guess"] not in types:
+            continue
+        v = value_fn(a)
+        if v is None:
+            continue
+        idx = (datetime.date.fromisoformat(a["date"]) - day0).days
+        if not (0 <= idx < n_days):
+            continue
+        w = idx // 7
+        if 0 <= w < n_weeks:
+            by_week.setdefault(w, []).append(v)
+    out = np.full(n_weeks, np.nan)
+    for w, vs in by_week.items():
+        out[w] = sum(vs) if agg == "sum" else statistics.mean(vs)
+    return out
+
+
+def analyze_session_duration_response(acts, day0, n_days, grade_adjust=True, type_="easy",
+                                       rolling_weeks=4, horizon_weeks=4, n_bins=5):
+    """Дозозависимость 'длительность ОДНОЙ тренировки типа type_ -> будущее изменение EF того же
+    типа' — эвристический (не Garmin TE) аналог analyze_training_effect_response, но для 'easy'/
+    'long', где quality_rep_response не применим (там нет рабочих отрезков). Доза недели = среднее
+    per-session duration_s среди тренировок этого типа на неделе (не сумма — вопрос не в объёме
+    недели, а в том, КАК ДОЛГО обычно длится одна тренировка этого типа), агрегируется тем же
+    способом (скользящее окно rolling_weeks, интерполяция пропущенных недель), горизонт Δ EF —
+    horizon_weeks недель вперёд. Добавлено 2026-08-17 по запросу 'на какую длительность легких/
+    длинных пробежек максимальный отклик' + 'записать оптимальные ориентиры в калибратор'."""
+    def _ef(a):
+        return _ef_of(a, grade_adjust)
+
+    n_weeks = n_days // 7
+    if n_weeks < 2 * (rolling_weeks + horizon_weeks):
+        return {"ok": False, "reason": f"недостаточно недель охвата ({n_weeks})"}
+
+    dur_raw = _weekly_series_from_acts(acts, day0, n_days, lambda a: a.get("duration_s"),
+                                        types=(type_,), agg="mean")
+    ef_raw = _weekly_series_from_acts(acts, day0, n_days, _ef, types=(type_,), agg="mean")
+    n_sessions = len([a for a in acts if a["type_guess"] == type_])
+
+    have_dur = ~np.isnan(dur_raw)
+    have_ef = ~np.isnan(ef_raw)
+    if have_dur.sum() < MIN_POINTS or have_ef.sum() < MIN_POINTS:
+        return {"ok": False, "reason": f"недостаточно недель с данными типа '{type_}' "
+                                        f"(duration: {int(have_dur.sum())}, ef: {int(have_ef.sum())}, "
+                                        f"нужно >= {MIN_POINTS})", "n_sessions": n_sessions}
+
+    dur_filled = np.interp(np.arange(n_weeks), np.flatnonzero(have_dur), dur_raw[have_dur])
+    dur_roll = np.array([np.mean(dur_filled[max(0, w - rolling_weeks + 1): w + 1]) for w in range(n_weeks)])
+    ef_filled = np.interp(np.arange(n_weeks), np.flatnonzero(have_ef), ef_raw[have_ef])
+
+    valid_w = np.arange(n_weeks - horizon_weeks)
+    delta_ef = ef_filled[valid_w + horizon_weeks] - ef_filled[valid_w]
+    dur_w = dur_roll[valid_w] / 60.0  # в минутах, для читаемости бинов
+
+    res = _bin_analysis_generic(dur_w, delta_ef, "duration_min", "mean_delta_ef_next_weeks", n_bins)
+    if isinstance(res, dict):
+        res["n_sessions"] = n_sessions
+        res["type"] = type_
+    return res
+
+
+def analyze_training_effect_response(acts, day0, n_days, grade_adjust=True,
+                                      rolling_weeks=4, horizon_weeks=4, n_bins=5):
+    """Дозозависимость по готовой оценке Garmin/Firstbeat 'Training Effect' (aerobic/anaerobic,
+    шкала 0-5, поля activities.aerobic_training_effect/anaerobic_training_effect) — АЛЬТЕРНАТИВА
+    восстановленным вручную дозам (объём в volume_ef_response, длина/длительность отрезка в
+    quality_rep_response): здесь 'доза' — не то, что мы сами посчитали по GPS/пульсу, а прямая
+    оценка нагрузки самого Garmin. Три варианта, по запросу пользователя (2026-08-12):
+      1) суммарный НЕДЕЛЬНЫЙ aerobic TE по ВСЕМ тренировкам -> Δ EF на лёгких (аналог объёма,
+         но доза — TE, а не км) — грубый, ожидаемо самый шумный вариант.
+      2) СРЕДНИЙ aerobic TE именно на качественных (interval/threshold/mixed) -> Δ EF на
+         интервалах — 'насколько ударна аэробно качественная тренировка' против будущего отклика.
+      3) СРЕДНИЙ anaerobic TE на качественных -> Δ EF на интервалах — то же для анаэробного
+         компонента (у неё почти всегда ближе к 0 на лёгких/длинных, не считаем там).
+    EF здесь БЕЗ сезонной детрендировки (в отличие от volume_ef_response/axes) — тот же уровень
+    строгости, что и в quality_rep_response, не выше; недели без измерений интерполируются линейно
+    между соседними неделями с данными, как везде в этом файле."""
+    def _ef(a):
+        return _ef_of(a, grade_adjust)
+
+    n_weeks = n_days // 7
+    if n_weeks < 2 * (rolling_weeks + horizon_weeks):
+        return {"ok": False, "reason": f"недостаточно недель охвата ({n_weeks})"}
+
+    def _roll_interp(arr):
+        have = ~np.isnan(arr)
+        if have.sum() < MIN_POINTS:
+            return None, int(have.sum())
+        filled = np.interp(np.arange(n_weeks), np.flatnonzero(have), arr[have])
+        rolled = np.array([np.mean(filled[max(0, w - rolling_weeks + 1): w + 1]) for w in range(n_weeks)])
+        return rolled, int(have.sum())
+
+    def _delta_of(ef_arr):
+        have = ~np.isnan(ef_arr)
+        if have.sum() < MIN_POINTS:
+            return None
+        filled = np.interp(np.arange(n_weeks), np.flatnonzero(have), ef_arr[have])
+        valid_w = np.arange(n_weeks - horizon_weeks)
+        return filled[valid_w + horizon_weeks] - filled[valid_w], valid_w
+
+    def _run_dose(dose_arr, delta_pack, dose_label, n_real_weeks, n_sessions):
+        if dose_arr is None or delta_pack is None:
+            return {"ok": False, "reason": "недостаточно недель с данными (доза или EF)"}
+        delta_ef, valid_w = delta_pack
+        dose_w = dose_arr[valid_w]
+        res = _bin_analysis_generic(dose_w, delta_ef, dose_label, "mean_delta_ef_next_weeks", n_bins)
+        res["n_real_weeks_with_data"] = n_real_weeks
+        res["n_sessions"] = n_sessions
+        return res
+
+    aero_all_raw = _weekly_series_from_acts(acts, day0, n_days, lambda a: a.get("aerobic_training_effect"), types=None, agg="sum")
+    aero_all_roll, aero_all_real = _roll_interp(aero_all_raw)
+    easy_ef_raw = _weekly_series_from_acts(acts, day0, n_days, _ef, types=("easy",), agg="mean")
+    delta_easy = _delta_of(easy_ef_raw)
+    n_easy = len([a for a in acts if a["type_guess"] == "easy"])
+
+    quality_types = ("interval", "threshold", "mixed")
+    aero_q_raw = _weekly_series_from_acts(acts, day0, n_days, lambda a: a.get("aerobic_training_effect"), types=quality_types, agg="mean")
+    aero_q_roll, aero_q_real = _roll_interp(aero_q_raw)
+    anaero_q_raw = _weekly_series_from_acts(acts, day0, n_days, lambda a: a.get("anaerobic_training_effect"), types=quality_types, agg="mean")
+    anaero_q_roll, anaero_q_real = _roll_interp(anaero_q_raw)
+    interval_ef_raw = _weekly_series_from_acts(acts, day0, n_days, _ef, types=("interval",), agg="mean")
+    delta_interval = _delta_of(interval_ef_raw)
+    n_quality = len([a for a in acts if a["type_guess"] in quality_types])
+
+    # доза 4 (добавлено 2026-08-17): средний aerobic TE на 'long' -> Δ EF(long) — тот же принцип,
+    # что доза 2, но для длинных тренировок (ad-hoc находка при предыдущем анализе: r=-0.325,
+    # p=0.001, лучшая зона TE~3.36-3.85 — теперь закреплено как переиспользуемый код, а не разовый
+    # bash-расчёт, т.к. именно она используется build_optimal_targets ниже для типа 'long').
+    aero_long_raw = _weekly_series_from_acts(acts, day0, n_days, lambda a: a.get("aerobic_training_effect"), types=("long",), agg="mean")
+    aero_long_roll, aero_long_real = _roll_interp(aero_long_raw)
+    long_ef_raw = _weekly_series_from_acts(acts, day0, n_days, _ef, types=("long",), agg="mean")
+    delta_long = _delta_of(long_ef_raw)
+    n_long = len([a for a in acts if a["type_guess"] == "long"])
+
+    n_with_te = len([a for a in acts if a.get("aerobic_training_effect") is not None])
+
+    return {
+        "ok": True,
+        "method": f"недельная агрегация (без сезонной детрендировки EF, интерполяция недель без "
+                  f"измерений): доза 1 — сумма aerobic_training_effect за неделю по ВСЕМ тренировкам "
+                  f"vs Δ EF(easy); доза 2 — средний aerobic_training_effect на качественных "
+                  f"(interval/threshold/mixed) vs Δ EF(interval); доза 3 — средний "
+                  f"anaerobic_training_effect на качественных vs Δ EF(interval); скользящее окно "
+                  f"{rolling_weeks} нед., горизонт {horizon_weeks} нед., корзины квантильные по {n_bins}.",
+        "n_activities_with_training_effect": n_with_te,
+        "aerobic_te_sum_all_vs_easy_ef": _run_dose(aero_all_roll, delta_easy, "aerobic_te_sum_weekly", aero_all_real, n_easy),
+        "aerobic_te_mean_quality_vs_interval_ef": _run_dose(aero_q_roll, delta_interval, "aerobic_te_mean_weekly", aero_q_real, n_quality),
+        "anaerobic_te_mean_quality_vs_interval_ef": _run_dose(anaero_q_roll, delta_interval, "anaerobic_te_mean_weekly", anaero_q_real, n_quality),
+        "aerobic_te_mean_long_vs_long_ef": _run_dose(aero_long_roll, delta_long, "aerobic_te_mean_weekly", aero_long_real, n_long),
+        "caveat": "Training Effect — готовая оценка Garmin/Firstbeat (не пересчитывается нами), "
+                  "шкала грубая (шаг 0.1, много повторяющихся/нулевых значений на anaerobic), поэтому "
+                  "корреляции здесь ожидаемо слабее и шумнее, чем у quality_rep_response (длина/"
+                  "длительность отрезка в метрах/секундах — непрерывная величина). Такое же "
+                  "предупреждение про автокорреляцию скользящих недель и интерполяцию, как у "
+                  "volume_ef_response/quality_rep_response — смотрите на n_sessions/"
+                  "n_real_weeks_with_data, не только на r/p.",
+    }
+
+
+def _optimal_from_session_range(acts, type_, key, rng):
+    """Реальные (не бинированные) тренировки типа type_, у которых key попадает в диапазон best_bin
+    какого-то dose-response анализа -> фактические средние duration/distance по этим тренировкам.
+    Используется build_optimal_targets для 'easy'/'long' (сессия = вся тренировка целиком)."""
+    if rng is None:
+        return {"ok": False, "reason": "нет диапазона best_bin (источник анализа недоступен)"}
+    lo, hi = rng
+    sel = [a for a in acts if a["type_guess"] == type_ and a.get(key) is not None and lo <= a[key] <= hi]
+    if not sel:
+        return {"ok": False, "reason": f"ни одна реальная тренировка типа '{type_}' не попала в "
+                                        f"диапазон {key} [{lo}, {hi}]", "range_used": [lo, hi]}
+    return {
+        "ok": True,
+        "n_sessions": len(sel),
+        "avg_duration_min": round(statistics.mean(a["duration_s"] for a in sel) / 60.0, 1),
+        "avg_distance_km": round(statistics.mean(a["distance_m"] for a in sel) / 1000.0, 2)
+                            if all(a.get("distance_m") for a in sel) else None,
+        "range_used": [lo, hi],
+    }
+
+
+def _optimal_from_rep_range(recs, key, rng):
+    """Реальные (не бинированные) реконструированные рабочие отрезки (см. reconstruct_reps), у
+    которых key попадает в диапазон best_bin -> фактические средние длина/длительность/число
+    повторов по этим тренировкам. Используется build_optimal_targets для 'interval'/'threshold'."""
+    if rng is None:
+        return {"ok": False, "reason": "нет диапазона best_bin (источник анализа недоступен)"}
+    lo, hi = rng
+    sel = [r for r in recs if r.get(key) is not None and lo <= r[key] <= hi]
+    if not sel:
+        return {"ok": False, "reason": f"ни одна реальная тренировка не попала в диапазон "
+                                        f"{key} [{lo}, {hi}]", "range_used": [lo, hi]}
+    return {
+        "ok": True,
+        "n_sessions": len(sel),
+        "avg_rep_distance_m": round(statistics.mean(r["avg_rep_distance_m"] for r in sel), 1),
+        "avg_rep_duration_s": round(statistics.mean(r["avg_rep_duration_s"] for r in sel), 1),
+        "avg_n_reps": round(statistics.mean(r["n_reps"] for r in sel), 1),
+        "range_used": [lo, hi],
+    }
+
+
+def build_optimal_targets(acts, intervals_by_activity, day0, n_days, quality_rep_response,
+                           training_effect_response, duration_easy, duration_long):
+    """СИНТЕЗ (добавлено 2026-08-17 по запросу 'записать оптимальные ориентиры по двум источникам —
+    эвристическому и по training effect, чтобы калькулятор от них отталкивался'): для каждого типа
+    тренировки (long/easy/interval/threshold) и каждого источника дозы (heuristic = наша собственная
+    реконструкция по GPS/пульсу; training_effect = готовая оценка Garmin/Firstbeat) берётся диапазон
+    best_bin соответствующего dose-response анализа (см. analyze_session_duration_response,
+    analyze_quality_rep_response, analyze_training_effect_response выше), и по нему фильтруются
+    РЕАЛЬНЫЕ тренировки/повторы этого атлета — берётся фактическое среднее (не бины), ровно та же
+    методика, что применялась вручную по замечаниям пользователя ('надо агрегировать тренировки...
+    считать среднюю длительность... или расстояние/повторы'). Каждая запись ok=False честно
+    объясняет, почему источник недоступен для этого типа (например для 'easy' training_effect
+    оценивается только как суммарный TE по ВСЕМ тренировкам недели — несопоставимая единица с
+    длительностью одной лёгкой тренировки, поэтому easy.training_effect всегда ok=False)."""
+    reps_by_activity = _reconstruct_reps_by_activity(
+        acts, intervals_by_activity, ("interval", "threshold", "mixed"), day0, n_days)
+    all_recs = list(reps_by_activity.values())
+    interval_recs = [r for r in all_recs if r["avg_rep_duration_s"] < REP_THRESHOLD_DURATION_S]
+    threshold_recs = [r for r in all_recs if r["avg_rep_duration_s"] >= REP_THRESHOLD_DURATION_S]
+
+    def _rng_from(d, *path):
+        cur = d
+        for p in path:
+            if not isinstance(cur, dict) or not cur.get("ok", True):
+                return None
+            cur = cur.get(p)
+            if cur is None:
+                return None
+        return cur
+
+    # --- easy: heuristic = длительность одной лёгкой тренировки (analyze_session_duration_response) ---
+    easy_dur_rng = _rng_from(duration_easy, "best_bin", "duration_min_range")
+    easy_heuristic = _optimal_from_session_range(acts, "easy", "duration_s",
+                                                  [easy_dur_rng[0] * 60, easy_dur_rng[1] * 60] if easy_dur_rng else None)
+    easy_te = {"ok": False, "reason": "training_effect_response для 'easy' считает только суммарный "
+                                       "недельный TE по ВСЕМ тренировкам (aerobic_te_sum_all_vs_easy_ef) "
+                                       "— это доза целой недели, а не одной лёгкой тренировки, поэтому "
+                                       "напрямую фильтровать по нему реальные лёгкие тренировки некорректно."}
+
+    # --- long: heuristic = длительность одной длинной тренировки; TE = средний aerobic TE тренировки 'long' ---
+    long_dur_rng = _rng_from(duration_long, "best_bin", "duration_min_range")
+    long_heuristic = _optimal_from_session_range(acts, "long", "duration_s",
+                                                  [long_dur_rng[0] * 60, long_dur_rng[1] * 60] if long_dur_rng else None)
+    long_te_rng = _rng_from(training_effect_response, "aerobic_te_mean_long_vs_long_ef",
+                             "best_bin", "aerobic_te_mean_weekly_range")
+    long_te = _optimal_from_session_range(acts, "long", "aerobic_training_effect", long_te_rng)
+
+    # --- interval (<9 мин рабочий отрезок): heuristic = длина отрезка; TE = средний aerobic TE качественной тренировки ---
+    interval_len_rng = _rng_from(quality_rep_response, "interval_lt_9min", "rep_length_m",
+                                  "best_bin", "rep_length_m_range")
+    interval_heuristic = _optimal_from_rep_range(interval_recs, "avg_rep_distance_m", interval_len_rng)
+    interval_te_rng = _rng_from(training_effect_response, "aerobic_te_mean_quality_vs_interval_ef",
+                                 "best_bin", "aerobic_te_mean_weekly_range")
+    interval_te = _optimal_from_rep_range(interval_recs, "aerobic_training_effect", interval_te_rng)
+
+    # --- threshold (>=9 мин рабочий отрезок): та же методика, но обычно 0 сессий (см. caveat quality_rep_response) ---
+    threshold_len_rng = _rng_from(quality_rep_response, "threshold_ge_9min", "rep_length_m",
+                                   "best_bin", "rep_length_m_range")
+    threshold_heuristic = _optimal_from_rep_range(threshold_recs, "avg_rep_distance_m", threshold_len_rng)
+    if len(threshold_recs) == 0:
+        threshold_heuristic = {"ok": False, "reason": "в истории нет ни одной тренировки с рабочим "
+                                                        "отрезком >= 9 мин (см. quality_rep_response.threshold_ge_9min) "
+                                                        "— ориентир по интервалам вместо этого."}
+    threshold_te_rng = _rng_from(training_effect_response, "aerobic_te_mean_quality_vs_interval_ef",
+                                  "best_bin", "aerobic_te_mean_weekly_range")
+    threshold_te = _optimal_from_rep_range(threshold_recs, "aerobic_training_effect", threshold_te_rng)
+    if len(threshold_recs) == 0:
+        threshold_te = {"ok": False, "reason": threshold_heuristic["reason"]}
+
+    return {
+        "method": "Для каждого типа (long/easy/interval/threshold) и каждого источника (heuristic — "
+                  "наша реконструкция по GPS/пульсу; training_effect — оценка Garmin/Firstbeat) берётся "
+                  "диапазон best_bin из соответствующего dose-response анализа выше, и по нему "
+                  "фильтруются РЕАЛЬНЫЕ тренировки/повторы (не квантильные бины) — среднее по ним и "
+                  "есть ориентир для калькулятора. ok=False у конкретного type.source значит: либо "
+                  "источник статистически недостоверен (см. соответствующий analyze_* выше), либо "
+                  "ни одна реальная тренировка не попала в найденный диапазон, либо единицы измерения "
+                  "несопоставимы (см. reason).",
+        "easy": {"heuristic": easy_heuristic, "training_effect": easy_te},
+        "long": {"heuristic": long_heuristic, "training_effect": long_te},
+        "interval": {"heuristic": interval_heuristic, "training_effect": interval_te},
+        "threshold": {"heuristic": threshold_heuristic, "training_effect": threshold_te},
+    }
+
+
 def build_report(db_path, max_hr, rest_hr, sex, stimulus_map, threshold_hr=None,
                   seasonal=True, gap_days=10, acwr_threshold=1.5, use_wellness=True,
                   use_garmin_threshold=True, use_cross_training=True,
@@ -1510,6 +2073,14 @@ def build_report(db_path, max_hr, rest_hr, sex, stimulus_map, threshold_hr=None,
     overload = analyze_gaps_and_overload(acts, cross_acts, daily_total_load, day0, n_days, gap_days, acwr_threshold)
     overload_by_category = analyze_category_acwr(daily_category_load, acwr_threshold)
     volume_ef_response = analyze_volume_ef_response(acts, daily_total_load, day0, n_days, grade_adjust=grade_adjust)
+    intervals_by_activity = load_intervals(db_path)
+    quality_rep_response = analyze_quality_rep_response(acts, intervals_by_activity, day0, n_days)
+    training_effect_response = analyze_training_effect_response(acts, day0, n_days, grade_adjust=grade_adjust)
+    duration_response_easy = analyze_session_duration_response(acts, day0, n_days, grade_adjust=grade_adjust, type_="easy")
+    duration_response_long = analyze_session_duration_response(acts, day0, n_days, grade_adjust=grade_adjust, type_="long")
+    optimal_targets = build_optimal_targets(acts, intervals_by_activity, day0, n_days,
+                                             quality_rep_response, training_effect_response,
+                                             duration_response_easy, duration_response_long)
 
     if use_wellness:
         wellness = load_wellness(db_path)
@@ -1694,6 +2265,26 @@ def build_report(db_path, max_hr, rest_hr, sex, stimulus_map, threshold_hr=None,
         "Δ EF', не статистический breakpoint-тест. Использовать как ориентир (диапазон, а не точное "
         "число), пересчитывать при появлении новых данных, не подставлять bins напрямую как hard "
         "constraint в калькулятор без здравого смысла.",
+        "quality_rep_response (длина/длительность рабочего отрезка и число повторов -> Δ EF "
+        "рабочих отрезков, см. блок выше) — до фикса lap_type_key в garmin_activities_export.py "
+        "(2026-08-12) вся таблица intervals экспортировалась с lap_type=NULL, поэтому реконструкция "
+        "работает на эвристике по дистанции/темпу лапов (reconstruct_reps), а не на реальной разметке "
+        "Garmin ACTIVE/REST/WARMUP/COOLDOWN — переэкспортируй историю (повторный запуск "
+        "garmin_activities_export.py за тот же период перезапишет intervals с реальным lap_type) для "
+        "более надёжного результата. Подвыборка threshold_ge_9min особенно чувствительна к этому: "
+        "если n_sessions там мало (см. сам блок), correlation_r/p посчитаны в основном по "
+        "интерполированным неделям и могут быть статистическим артефактом.",
+        "training_effect_response (Garmin/Firstbeat aerobic/anaerobic TE -> Δ EF, см. блок выше) — "
+        "готовая оценка Garmin, не наша величина: шкала грубая (шаг 0.1), поэтому даже там, где "
+        "correlation_p_approx проходит порог 0.05, величина эффекта (r) обычно слабее, чем у "
+        "quality_rep_response на тех же тренировках. EF здесь БЕЗ сезонной детрендировки — не "
+        "сравнивайте r/p напрямую с axes/volume_ef_response (там она есть).",
+        "optimal_targets (см. блок выше) — это НЕ формальная оптимизация, а фактическое среднее по "
+        "реальным тренировкам, попавшим в best_bin соответствующего dose-response анализа выше; "
+        "унаследует все ограничения того анализа (маленький n_sessions, шум TE-шкалы, неучёт "
+        "автокорреляции недель) — обновляйте профиль по мере накопления новой истории, не считайте "
+        "числа окончательными. easy.training_effect и любые ok=False поля — не баг, а честный "
+        "результат несопоставимости источника с типом тренировки (см. reason внутри каждого поля).",
     ]
 
     cross_summary = {}
@@ -1724,6 +2315,11 @@ def build_report(db_path, max_hr, rest_hr, sex, stimulus_map, threshold_hr=None,
         "overload_gaps": overload,
         "overload_by_category": overload_by_category,
         "volume_ef_response": volume_ef_response,
+        "quality_rep_response": quality_rep_response,
+        "training_effect_response": training_effect_response,
+        "duration_response_easy": duration_response_easy,
+        "duration_response_long": duration_response_long,
+        "optimal_targets": optimal_targets,
         "systemic_fatigue": systemic,
         "fatigue_category_mapping": fatigue_category_mapping,
         "not_calibrated": not_calibrated,
@@ -1831,6 +2427,94 @@ def print_summary(report):
                 print(f"    устойчивый переход в спад начиная с ~{r['decline_threshold']}")
             else:
                 print("    устойчивого перехода в спад по крайним корзинам не обнаружено")
+
+    print("\n-- Дозозависимость внутри качественных тренировок: длина/длительность рабочего "
+          "отрезка и число повторов -> Δ EF рабочих отрезков (quality_rep_response) --")
+    qrr = report.get("quality_rep_response", {})
+    if not qrr.get("ok"):
+        print(f"  не откалибровано — {qrr.get('reason')}")
+    else:
+        print(f"  качественных тренировок всего: {qrr['n_quality_activities_total']}, "
+              f"с восстановленными отрезками: {qrr['n_with_reconstructed_reps']}")
+        for sub_label, sub_key in (("Интервальные (<9 мин на отрезок)", "interval_lt_9min"),
+                                    ("Пороговые (>=9 мин на отрезок)", "threshold_ge_9min")):
+            sub = qrr.get(sub_key, {})
+            print(f"\n  * {sub_label}:")
+            if not sub.get("ok"):
+                print(f"    не откалибровано — {sub.get('reason')}")
+                continue
+            print(f"    сессий: {sub['n_sessions']}, реальных недель с данными: {sub['n_real_weeks_with_data']}")
+            for dose_label, dose_key in (("длина отрезка (м)", "rep_length_m"),
+                                          ("длительность отрезка (с)", "rep_duration_s"),
+                                          ("число повторов", "n_reps")):
+                r = sub.get(dose_key, {})
+                if not r.get("ok"):
+                    print(f"    {dose_label}: не откалибровано — {r.get('reason')}")
+                    continue
+                print(f"    {dose_label}: r={r['correlation_r']} (p~{r['correlation_p_approx']}, n={r['n_weeks']})")
+                for b in r["bins"]:
+                    rng_key = [k for k in b if k.endswith("_range")][0]
+                    mean_key = [k for k in b if k.endswith("_mean")][0]
+                    print(f"      {b[rng_key][0]:>7.1f}..{b[rng_key][1]:<7.1f} (сред. {b[mean_key]:>7.1f}, "
+                          f"n={b['n_weeks']:>2d}): Δ EF отрезков = {b['mean_delta_rep_ef_next_weeks']:+.5f}")
+                print(f"      лучшая корзина: {r['best_bin']}")
+
+    print("\n-- Дозозависимость по Garmin Training Effect (aerobic/anaerobic) -> Δ EF (training_effect_response) --")
+    ter = report.get("training_effect_response", {})
+    if not ter.get("ok"):
+        print(f"  не откалибровано — {ter.get('reason')}")
+    else:
+        print(f"  тренировок с TE: {ter['n_activities_with_training_effect']}")
+        for te_label, te_key in (("Sum aerobic TE/нед (все) -> Δ EF(easy)", "aerobic_te_sum_all_vs_easy_ef"),
+                                  ("Avg aerobic TE/нед (качественные) -> Δ EF(interval)", "aerobic_te_mean_quality_vs_interval_ef"),
+                                  ("Avg anaerobic TE/нед (качественные) -> Δ EF(interval)", "anaerobic_te_mean_quality_vs_interval_ef"),
+                                  ("Avg aerobic TE/нед (long) -> Δ EF(long)", "aerobic_te_mean_long_vs_long_ef")):
+            r = ter.get(te_key, {})
+            print(f"\n  * {te_label}:")
+            if not r.get("ok"):
+                print(f"    не откалибровано — {r.get('reason')}")
+                continue
+            print(f"    сессий типа: {r.get('n_sessions')}, недель с реальными данными: {r.get('n_real_weeks_with_data')}")
+            print(f"    r={r['correlation_r']} (p~{r['correlation_p_approx']}, n={r['n_weeks']})")
+            for b in r["bins"]:
+                rng_key = [k for k in b if k.endswith("_range")][0]
+                mean_key = [k for k in b if k.endswith("_mean")][0]
+                print(f"      {b[rng_key][0]:>6.2f}..{b[rng_key][1]:<6.2f} (сред. {b[mean_key]:>6.2f}, "
+                      f"n={b['n_weeks']:>2d}): Δ EF = {b['mean_delta_ef_next_weeks']:+.5f}")
+            print(f"      лучшая корзина: {r['best_bin']}")
+
+    print("\n-- Длительность ОДНОЙ тренировки (easy/long) -> Δ EF (duration_response_*) --")
+    for label, key in (("Easy", "duration_response_easy"), ("Long", "duration_response_long")):
+        r = report.get(key, {})
+        if not r.get("ok"):
+            print(f"  {label}: не откалибровано — {r.get('reason')}")
+            continue
+        print(f"  {label} (n_sessions={r.get('n_sessions')}, r={r['correlation_r']} p~{r['correlation_p_approx']}):")
+        for b in r["bins"]:
+            print(f"      {b['duration_min_range'][0]:>6.1f}..{b['duration_min_range'][1]:<6.1f} мин "
+                  f"(сред. {b['duration_min_mean']:>6.1f}, n={b['n_weeks']:>2d}): "
+                  f"Δ EF = {b['mean_delta_ef_next_weeks']:+.5f}")
+        print(f"      лучшая корзина: {r['best_bin']}")
+
+    print("\n-- optimal_targets: ориентиры для калькулятора по двум источникам (heuristic / "
+          "training_effect), см. докстринг build_optimal_targets --")
+    ot = report.get("optimal_targets", {})
+    for type_label in ("easy", "long", "interval", "threshold"):
+        block = ot.get(type_label, {})
+        print(f"  [{type_label}]")
+        for src_label in ("heuristic", "training_effect"):
+            v = block.get(src_label, {})
+            if not v.get("ok"):
+                print(f"    {src_label:16s}: н/д — {v.get('reason')}")
+                continue
+            if "avg_rep_distance_m" in v:
+                print(f"    {src_label:16s}: длина={v['avg_rep_distance_m']:.0f}м  "
+                      f"длительность={v['avg_rep_duration_s']:.0f}с  повторов={v['avg_n_reps']:.1f}  "
+                      f"(n_sessions={v['n_sessions']}, диапазон={v['range_used']})")
+            else:
+                print(f"    {src_label:16s}: длительность={v['avg_duration_min']:.1f}мин  "
+                      f"дистанция={v.get('avg_distance_km')}км  "
+                      f"(n_sessions={v['n_sessions']}, диапазон={v['range_used']})")
 
     print("\n-- Systemic fatigue по wellness-метрикам (HRV/RHR/Body Battery/стресс/сон — независимые; "
           "Training Readiness показан отдельно как сверка, не источник калибровки, см. п.8а) --")

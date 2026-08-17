@@ -1,7 +1,7 @@
 {
   "meta": {
     "db": "d:\\Git\\mytest\\garmin\\run_plan\\garmin_running_ystef.db",
-    "generated_at": "2026-08-12T13:41:47",
+    "generated_at": "2026-08-16T13:46:32",
     "period": [
       "2024-07-23",
       "2026-08-11"
@@ -14,7 +14,7 @@
       "skiing": 14,
       "cycling": 14
     },
-    "threshold_source": "none (TRIMP по %HRR)",
+    "threshold_source": "garmin_history(76 точек, 2024-08-04..2026-08-05)",
     "load_params": {
       "max_hr": 195,
       "rest_hr": 45,
@@ -54,58 +54,78 @@
       }
     }
   },
+  "treadmill_calibration": {
+    "applied": true,
+    "correction_factor": 1.216,
+    "correction_pct": 21.6,
+    "direction": "лента занижает темп (реальная дистанция больше репортированной)",
+    "n_outdoor": 446,
+    "n_treadmill": 236,
+    "n_treadmill_hr_matched": 236,
+    "outdoor_hr_range": [
+      94.0,
+      182.0
+    ],
+    "raw_ratio_before_clamp": null,
+    "note": "distance_m на treadmill_running умножены на 1.216 (+21.6%), оценено по 236 тредмильным тренировкам с ЧСС в диапазоне 94-182, сравнением с EF уличных пробежек того же диапазона ЧСС (log-линейная регрессия EF~avg_hr). Это оценка по прокси (EF), не прямое измерение — при появлении данных с реальной GPS-калибровкой ленты используйте --treadmill-correction для ручного коэффициента.",
+    "source": "auto (EF vs уличные пробежки, HR-matched)"
+  },
   "axes": {
     "aerobic": {
       "ok": true,
-      "tau_adapt_days": 36.9,
-      "tau_fatigue_days": 15.0,
-      "k1": 0.000116,
-      "k2": 3.8e-05,
-      "baseline_ef": 1.033,
-      "r2": 0.035,
+      "tau_adapt_days": 49.8,
+      "tau_fatigue_days": 3.5,
+      "k1": 0.000191,
+      "k2": -0.000319,
+      "baseline_ef": 1.0983,
+      "r2": 0.078,
       "n_points": 398,
-      "hit_bound": true,
+      "hit_bound": false,
       "source_types": [
         "easy"
       ],
       "seasonal": {
         "applied": true,
-        "peak_around": "21.08",
-        "trough_around": "24.12",
-        "drop_peak_to_trough_pct": 23.2,
-        "note": "EF в среднем ниже своего годового пика на ~23.2% в районе 24.12 (вероятно погода/покрытие, не потеря формы) — фит tau_adapt/tau_fatigue ниже использует EF ПОСЛЕ вычитания этого сезонного эффекта."
+        "peak_around": "12.07",
+        "trough_around": "21.01",
+        "drop_peak_to_trough_pct": 9.6,
+        "n_outdoor_used": 204,
+        "n_indoor_passthrough": 194,
+        "note": "EF на уличных тренировках в среднем ниже своего годового пика на ~9.6% в районе 21.01 (вероятно погода/покрытие, не потеря формы) — фит tau_adapt/tau_fatigue ниже использует EF ПОСЛЕ вычитания этого сезонного эффекта. Кривая оценена по 204 уличным точкам; 194 тредмильных точек в выборке пропущены через поправку без изменений (сезонность на дорожке физически отсутствует, у неё своя калибровка темпа, см. п.5б)."
       },
-      "fit_quality": "UNIDENTIFIED",
-      "tau_adapt_used": 35.0,
-      "tau_fatigue_used": 2.0,
-      "shrinkage_weight": 0.0,
-      "note_quality": "фит недостоверен (R²<0.05 или упёрся в границу диапазона) — tau_*_used равны дефолту, калиброванные числа НЕ должны менять модель."
+      "fit_quality": "WEAK",
+      "tau_adapt_used": 39.16,
+      "tau_fatigue_used": 2.42,
+      "shrinkage_weight": 0.281,
+      "note_quality": "фит слабый — tau_used подмешан к дефолту (см. shrinkage_weight), не подставляйте tau_adapt_days/tau_fatigue_days напрямую в модель, используйте tau_*_used."
     },
     "endurance": {
       "ok": true,
-      "tau_adapt_days": 61.9,
-      "tau_fatigue_days": 11.5,
-      "k1": 9.1e-05,
-      "k2": -4.6e-05,
-      "baseline_ef": 1.0996,
-      "r2": 0.087,
+      "tau_adapt_days": 58.3,
+      "tau_fatigue_days": 20.0,
+      "k1": 0.000321,
+      "k2": 0.000161,
+      "baseline_ef": 1.1074,
+      "r2": 0.128,
       "n_points": 71,
-      "hit_bound": false,
+      "hit_bound": true,
       "source_types": [
         "long"
       ],
       "seasonal": {
         "applied": true,
-        "peak_around": "28.08",
-        "trough_around": "06.01",
-        "drop_peak_to_trough_pct": 13.6,
-        "note": "EF в среднем ниже своего годового пика на ~13.6% в районе 06.01 (вероятно погода/покрытие, не потеря формы) — фит tau_adapt/tau_fatigue ниже использует EF ПОСЛЕ вычитания этого сезонного эффекта."
+        "peak_around": "31.08",
+        "trough_around": "03.01",
+        "drop_peak_to_trough_pct": 13.5,
+        "n_outdoor_used": 69,
+        "n_indoor_passthrough": 2,
+        "note": "EF на уличных тренировках в среднем ниже своего годового пика на ~13.5% в районе 03.01 (вероятно погода/покрытие, не потеря формы) — фит tau_adapt/tau_fatigue ниже использует EF ПОСЛЕ вычитания этого сезонного эффекта. Кривая оценена по 69 уличным точкам; 2 тредмильных точек в выборке пропущены через поправку без изменений (сезонность на дорожке физически отсутствует, у неё своя калибровка темпа, см. п.5б)."
       },
-      "fit_quality": "WEAK",
-      "tau_adapt_used": 57.23,
-      "tau_fatigue_used": 7.1,
-      "shrinkage_weight": 0.323,
-      "note_quality": "фит слабый — tau_used подмешан к дефолту (см. shrinkage_weight), не подставляйте tau_adapt_days/tau_fatigue_days напрямую в модель, используйте tau_*_used."
+      "fit_quality": "UNIDENTIFIED",
+      "tau_adapt_used": 55.0,
+      "tau_fatigue_used": 5.0,
+      "shrinkage_weight": 0.0,
+      "note_quality": "фит недостоверен (R²<0.05 или упёрся в границу диапазона) — tau_*_used равны дефолту, калиброванные числа НЕ должны менять модель."
     },
     "threshold": {
       "ok": false,
@@ -115,11 +135,11 @@
     "vo2": {
       "ok": true,
       "tau_adapt_days": 45.0,
-      "tau_fatigue_days": 10.0,
-      "k1": 0.000241,
-      "k2": 0.000346,
-      "baseline_ef": 1.1075,
-      "r2": 0.168,
+      "tau_fatigue_days": 2.4,
+      "k1": 0.00043,
+      "k2": 0.002875,
+      "baseline_ef": 1.2455,
+      "r2": 0.225,
       "n_points": 157,
       "hit_bound": true,
       "source_types": [
@@ -127,10 +147,12 @@
       ],
       "seasonal": {
         "applied": true,
-        "peak_around": "01.08",
-        "trough_around": "16.01",
-        "drop_peak_to_trough_pct": 13.9,
-        "note": "EF в среднем ниже своего годового пика на ~13.9% в районе 16.01 (вероятно погода/покрытие, не потеря формы) — фит tau_adapt/tau_fatigue ниже использует EF ПОСЛЕ вычитания этого сезонного эффекта."
+        "peak_around": "09.06",
+        "trough_around": "23.01",
+        "drop_peak_to_trough_pct": 11.1,
+        "n_outdoor_used": 118,
+        "n_indoor_passthrough": 39,
+        "note": "EF на уличных тренировках в среднем ниже своего годового пика на ~11.1% в районе 23.01 (вероятно погода/покрытие, не потеря формы) — фит tau_adapt/tau_fatigue ниже использует EF ПОСЛЕ вычитания этого сезонного эффекта. Кривая оценена по 118 уличным точкам; 39 тредмильных точек в выборке пропущены через поправку без изменений (сезонность на дорожке физически отсутствует, у неё своя калибровка темпа, см. п.5б)."
       },
       "fit_quality": "UNIDENTIFIED",
       "tau_adapt_used": 25.0,
@@ -140,8 +162,29 @@
     }
   },
   "orthopedic_fit": {
-    "ok": false,
-    "reason": "impactLoad ни разу не пришёл ни на одной активности в БД — экспортёр получил None на всех activities (проверить --dump-activity-fields на свежей тренировке)"
+    "ok": true,
+    "tau_adapt_days": 83.7,
+    "tau_fatigue_days": 4.0,
+    "k1": -0.0,
+    "k2": -2e-06,
+    "baseline_ef": 1.1946,
+    "r2": 0.203,
+    "n_points": 71,
+    "hit_bound": true,
+    "seasonal": {
+      "applied": true,
+      "peak_around": "31.08",
+      "trough_around": "03.01",
+      "drop_peak_to_trough_pct": 13.5,
+      "n_outdoor_used": 69,
+      "n_indoor_passthrough": 2,
+      "note": "EF на уличных тренировках в среднем ниже своего годового пика на ~13.5% в районе 03.01 (вероятно погода/покрытие, не потеря формы) — фит tau_adapt/tau_fatigue ниже использует EF ПОСЛЕ вычитания этого сезонного эффекта. Кривая оценена по 69 уличным точкам; 2 тредмильных точек в выборке пропущены через поправку без изменений (сезонность на дорожке физически отсутствует, у неё своя калибровка темпа, см. п.5б)."
+    },
+    "load_driver": "impact_load (механическая нагрузка от Garmin, НЕ HR-based TRIMP/IF^2)",
+    "fit_quality": "UNIDENTIFIED",
+    "tau_adapt_used": 55.0,
+    "tau_fatigue_used": 5.0,
+    "shrinkage_weight": 0.0
   },
   "orthopedic_body_battery_diagnostic": {
     "easy": {
@@ -171,12 +214,12 @@
       "interval",
       "threshold"
     ],
-    "tau_base_days": 4.64,
+    "tau_base_days": 4.62,
     "k": 0.0,
     "p": 4.0,
     "k_hist": 0.0,
     "history_window_days": 5,
-    "r2": 0.03,
+    "r2": 0.029,
     "n_pairs": 153,
     "note": "k_hist — насколько накопленная за history_window_days ДО тренировки нагрузка той же категории утомления усиливает требуемое восстановление (эффект 'несколько подряд'); k_hist≈0 — в ваших данных эффект кластера не обнаружен, это не то же самое, что 'эффекта нет физиологически' — возможно, мало пар или разброс load недостаточен, чтобы его отличить от шума."
   },
@@ -190,7 +233,7 @@
     "p": 0.5,
     "k_hist": 0.0,
     "history_window_days": 5,
-    "r2": -0.0,
+    "r2": 0.0,
     "n_pairs": 68,
     "note": "k_hist — насколько накопленная за history_window_days ДО тренировки нагрузка той же категории утомления усиливает требуемое восстановление (эффект 'несколько подряд'); k_hist≈0 — в ваших данных эффект кластера не обнаружен, это не то же самое, что 'эффекта нет физиологически' — возможно, мало пар или разброс load недостаточен, чтобы его отличить от шума."
   },
@@ -198,36 +241,36 @@
     "ok": true,
     "metric": "training_readiness_score",
     "n_points": 568,
-    "breakpoint_load": 84.4,
+    "breakpoint_load": 62.1,
     "acute_days": 7,
     "chronic_days": 28,
     "baseline_window_days": 14,
-    "r2": 0.1529,
-    "r2_without_acwr": 0.1201,
+    "r2": 0.1323,
+    "r2_without_acwr": 0.1055,
     "coefficients": {
       "const": {
-        "coef": 40.78016,
+        "coef": 42.05852,
         "p": 0.0
       },
       "baseline": {
-        "coef": 0.22225,
-        "p": 0.0001
+        "coef": 0.24202,
+        "p": 0.0
       },
       "load_below_bp": {
-        "coef": 0.03525,
-        "p": 0.5086
+        "coef": -0.07542,
+        "p": 0.272
       },
       "load_above_bp": {
-        "coef": -0.11914,
+        "coef": -0.29027,
         "p": 0.0
       },
       "acwr_minus1": {
-        "coef": -13.69865,
+        "coef": -12.41244,
         "p": 0.0
       },
       "load_above_bp_x_acwr": {
-        "coef": 0.02294,
-        "p": 0.6085
+        "coef": 0.23702,
+        "p": 0.1155
       }
     },
     "note": "load_below_bp обычно не значим (p столбца в coefficients) — ниже порога отклик статистически не отличим от шума дней полного отдыха (проверено отдельно вне этого скрипта: std изменения метрики в дни без тренировки почти совпадает со std ниже порога). load_above_bp — цена нагрузки сегодняшнего дня выше порога. acwr_minus1 — эффект накопленной за неделю нагрузки относительно хронической (Gabbett ACWR), 0 = норма. load_above_bp_x_acwr — взаимодействие, знак/значимость нестабильны при смене спецификации (проверялось) — не основной результат."
@@ -255,16 +298,16 @@
   "estimated_optimal_spacing": {
     "interval_threshold": {
       "ok": true,
-      "estimated_days_at_median_load": 4.64,
-      "median_load_used": 108.4,
-      "r2_of_source_fit": 0.03,
+      "estimated_days_at_median_load": 4.62,
+      "median_load_used": 40.9,
+      "r2_of_source_fit": 0.029,
       "note": "оценка минимально необходимого интервала по adaptive response model (tau_base*(1+k*load^p)) при типичном load этого типа тренировок, без учёта k_hist/кластеров — используйте это значение для построения плана, а не observed из quality_session_spacing."
     },
     "long": {
       "ok": true,
       "estimated_days_at_median_load": 9.37,
-      "median_load_used": 225.5,
-      "r2_of_source_fit": -0.0,
+      "median_load_used": 90.8,
+      "r2_of_source_fit": 0.0,
       "note": "оценка минимально необходимого интервала по adaptive response model (tau_base*(1+k*load^p)) при типичном load этого типа тренировок, без учёта k_hist/кластеров — используйте это значение для построения плана, а не observed из quality_session_spacing."
     }
   },
@@ -273,7 +316,7 @@
     "acwr_threshold": 1.5,
     "acute_days": 7,
     "chronic_days": 28,
-    "median_acwr_overall": 1.06,
+    "median_acwr_overall": 1.05,
     "gaps": [
       {
         "start_date": "2025-11-05",
@@ -289,15 +332,43 @@
   "overload_by_category": {
     "neuromuscular": {
       "ok": true,
-      "median_acwr": 0.95,
-      "pct_days_elevated": 26.8,
+      "median_acwr": 0.98,
+      "pct_days_elevated": 27.2,
       "max_acwr": 4.0
     },
     "volume": {
       "ok": true,
-      "median_acwr": 1.02,
-      "pct_days_elevated": 12.7,
-      "max_acwr": 2.49
+      "median_acwr": 1.03,
+      "pct_days_elevated": 12.6,
+      "max_acwr": 2.41
+    }
+  },
+  "acwr_by_method": {
+    "acwr_threshold": 1.5,
+    "acute_days": 7,
+    "chronic_days": 28,
+    "by_garmin_training_load": {
+      "ok": true,
+      "current": 1.38,
+      "median": 1.04,
+      "n_days_elevated": 47,
+      "pct_days_elevated": 6.5
+    },
+    "by_volume_km": {
+      "ok": true,
+      "current": 1.42,
+      "median": 1.06,
+      "n_days_elevated": 42,
+      "pct_days_elevated": 5.8
+    },
+    "agreement": {
+      "n_days_compared": 723,
+      "correlation_r": 0.922,
+      "correlation_p_approx": 0.0,
+      "n_days_both_elevated": 30,
+      "n_days_only_garmin_elevated": 17,
+      "n_days_only_volume_elevated": 12,
+      "note": "Из 723 дней с обоими рядами: 30 дней оба способа согласны про перегрузку (ACWR>=1.5), 17 — только по Garmin training_load (похоже на рост интенсивности без роста объёма), 12 — только по объёму км (похоже на рост объёма без роста интенсивности, например добавили лёгких длинных). Совпадение (r=0.922) показывает, насколько два способа вообще движутся синхронно."
     }
   },
   "volume_ef_response": {
@@ -308,10 +379,12 @@
     ],
     "seasonal": {
       "applied": true,
-      "peak_around": "21.08",
-      "trough_around": "24.12",
-      "drop_peak_to_trough_pct": 23.2,
-      "note": "EF в среднем ниже своего годового пика на ~23.2% в районе 24.12 (вероятно погода/покрытие, не потеря формы) — фит tau_adapt/tau_fatigue ниже использует EF ПОСЛЕ вычитания этого сезонного эффекта."
+      "peak_around": "12.07",
+      "trough_around": "21.01",
+      "drop_peak_to_trough_pct": 9.6,
+      "n_outdoor_used": 204,
+      "n_indoor_passthrough": 194,
+      "note": "EF на уличных тренировках в среднем ниже своего годового пика на ~9.6% в районе 21.01 (вероятно погода/покрытие, не потеря формы) — фит tau_adapt/tau_fatigue ниже использует EF ПОСЛЕ вычитания этого сезонного эффекта. Кривая оценена по 204 уличным точкам; 194 тредмильных точек в выборке пропущены через поправку без изменений (сезонность на дорожке физически отсутствует, у неё своя калибровка темпа, см. п.5б)."
     },
     "n_weeks_total": 107,
     "by_rolling_volume_km_per_week": {
@@ -321,61 +394,61 @@
         {
           "rolling_volume_km_per_week_range": [
             2.42,
-            38.62
+            41.13
           ],
-          "rolling_volume_km_per_week_mean": 31.62,
-          "mean_delta_ef_next_4w": 0.0409,
+          "rolling_volume_km_per_week_mean": 33.11,
+          "mean_delta_ef_next_4w": 0.03,
           "n_weeks": 21
         },
         {
           "rolling_volume_km_per_week_range": [
-            40.82,
-            48.84
+            41.37,
+            52.71
           ],
-          "rolling_volume_km_per_week_mean": 45.0,
-          "mean_delta_ef_next_4w": 0.0061,
+          "rolling_volume_km_per_week_mean": 47.72,
+          "mean_delta_ef_next_4w": 0.0184,
           "n_weeks": 21
         },
         {
           "rolling_volume_km_per_week_range": [
-            48.92,
-            57.32
+            53.05,
+            61.33
           ],
-          "rolling_volume_km_per_week_mean": 54.41,
-          "mean_delta_ef_next_4w": 0.069,
+          "rolling_volume_km_per_week_mean": 57.54,
+          "mean_delta_ef_next_4w": 0.0396,
           "n_weeks": 21
         },
         {
           "rolling_volume_km_per_week_range": [
-            58.11,
-            65.45
+            61.73,
+            69.05
           ],
-          "rolling_volume_km_per_week_mean": 61.52,
-          "mean_delta_ef_next_4w": -0.0098,
+          "rolling_volume_km_per_week_mean": 64.84,
+          "mean_delta_ef_next_4w": 0.0044,
           "n_weeks": 20
         },
         {
           "rolling_volume_km_per_week_range": [
-            66.41,
-            80.41
+            69.17,
+            86.98
           ],
-          "rolling_volume_km_per_week_mean": 73.44,
-          "mean_delta_ef_next_4w": -0.0672,
+          "rolling_volume_km_per_week_mean": 76.35,
+          "mean_delta_ef_next_4w": -0.0512,
           "n_weeks": 20
         }
       ],
       "best_bin": {
         "rolling_volume_km_per_week_range": [
-          48.92,
-          57.32
+          53.05,
+          61.33
         ],
-        "rolling_volume_km_per_week_mean": 54.41,
-        "mean_delta_ef_next_4w": 0.069,
+        "rolling_volume_km_per_week_mean": 57.54,
+        "mean_delta_ef_next_4w": 0.0396,
         "n_weeks": 21
       },
-      "decline_threshold": 58.11,
-      "correlation_r": -0.258,
-      "correlation_p_approx": 0.0073
+      "decline_threshold": 69.17,
+      "correlation_r": -0.227,
+      "correlation_p_approx": 0.0193
     },
     "by_acwr": {
       "ok": true,
@@ -384,63 +457,464 @@
         {
           "acwr_range": [
             0.01,
-            0.82
+            0.83
           ],
-          "acwr_mean": 0.6,
-          "mean_delta_ef_next_4w": 0.0719,
+          "acwr_mean": 0.59,
+          "mean_delta_ef_next_4w": 0.0671,
           "n_weeks": 20
         },
         {
           "acwr_range": [
-            0.82,
-            0.98
+            0.83,
+            0.96
           ],
-          "acwr_mean": 0.91,
-          "mean_delta_ef_next_4w": -0.0566,
+          "acwr_mean": 0.9,
+          "mean_delta_ef_next_4w": -0.0359,
           "n_weeks": 20
         },
         {
           "acwr_range": [
-            0.99,
+            0.98,
             1.1
           ],
-          "acwr_mean": 1.04,
-          "mean_delta_ef_next_4w": 0.0057,
-          "n_weeks": 20
-        },
-        {
-          "acwr_range": [
-            1.1,
-            1.24
-          ],
-          "acwr_mean": 1.17,
-          "mean_delta_ef_next_4w": 0.0349,
-          "n_weeks": 20
-        },
-        {
-          "acwr_range": [
-            1.26,
-            2.0
-          ],
-          "acwr_mean": 1.42,
+          "acwr_mean": 1.05,
           "mean_delta_ef_next_4w": -0.0256,
+          "n_weeks": 20
+        },
+        {
+          "acwr_range": [
+            1.11,
+            1.22
+          ],
+          "acwr_mean": 1.16,
+          "mean_delta_ef_next_4w": 0.0458,
+          "n_weeks": 20
+        },
+        {
+          "acwr_range": [
+            1.23,
+            1.93
+          ],
+          "acwr_mean": 1.44,
+          "mean_delta_ef_next_4w": -0.0245,
           "n_weeks": 20
         }
       ],
       "best_bin": {
         "acwr_range": [
           0.01,
-          0.82
+          0.83
         ],
-        "acwr_mean": 0.6,
-        "mean_delta_ef_next_4w": 0.0719,
+        "acwr_mean": 0.59,
+        "mean_delta_ef_next_4w": 0.0671,
         "n_weeks": 20
       },
-      "decline_threshold": 1.26,
+      "decline_threshold": 1.23,
       "correlation_r": -0.2,
-      "correlation_p_approx": 0.0432
+      "correlation_p_approx": 0.0435
     },
     "caveat": "квантильные корзины по недельным окнам с интерполяцией EF между измерениями — не formal dose-response фит (как axes/recovery_nonlinearity), а описательная оценка направления и порога; недельные окна пересекаются (скользящее окно) — correlation_p_approx НЕ учитывает автокорреляцию и оптимистична, смотрите на n_weeks и величину r, не на p как на строгий тест значимости."
+  },
+  "quality_rep_response": {
+    "ok": true,
+    "method": "для каждой качественной тренировки (типы ['interval', 'threshold', 'mixed']) рабочие отрезки восстанавливаются reconstruct_reps (реальный lap_type, если переэкспортирован после фикса, иначе эвристика по дистанции/темпу); 'interval' = рабочий отрезок < 9 мин, 'threshold' = >= 9 мин (по факту, не по названию тренировки); длина/длительность отрезка и число повторов усредняются по неделе, скользящее окно 4 нед., изменение EF рабочих отрезков — через 4 нед. вперёд, корзины квантильные по 5.",
+    "n_quality_activities_total": 213,
+    "n_with_reconstructed_reps": 201,
+    "interval_lt_9min": {
+      "ok": true,
+      "n_sessions": 200,
+      "n_real_weeks_with_data": 93,
+      "rep_length_m": {
+        "ok": true,
+        "n_weeks": 103,
+        "bins": [
+          {
+            "rep_length_m_range": [
+              806.91,
+              895.99
+            ],
+            "rep_length_m_mean": 865.57,
+            "mean_delta_rep_ef_next_weeks": -0.00072,
+            "n_weeks": 21
+          },
+          {
+            "rep_length_m_range": [
+              898.51,
+              919.12
+            ],
+            "rep_length_m_mean": 907.91,
+            "mean_delta_rep_ef_next_weeks": -0.00024,
+            "n_weeks": 21
+          },
+          {
+            "rep_length_m_range": [
+              919.51,
+              949.9
+            ],
+            "rep_length_m_mean": 932.94,
+            "mean_delta_rep_ef_next_weeks": 0.00063,
+            "n_weeks": 21
+          },
+          {
+            "rep_length_m_range": [
+              949.93,
+              981.35
+            ],
+            "rep_length_m_mean": 965.93,
+            "mean_delta_rep_ef_next_weeks": 0.00053,
+            "n_weeks": 20
+          },
+          {
+            "rep_length_m_range": [
+              983.12,
+              1223.8
+            ],
+            "rep_length_m_mean": 1079.15,
+            "mean_delta_rep_ef_next_weeks": 4e-05,
+            "n_weeks": 20
+          }
+        ],
+        "best_bin": {
+          "rep_length_m_range": [
+            919.51,
+            949.9
+          ],
+          "rep_length_m_mean": 932.94,
+          "mean_delta_rep_ef_next_weeks": 0.00063,
+          "n_weeks": 21
+        },
+        "correlation_r": -0.058,
+        "correlation_p_approx": 0.5564
+      },
+      "rep_duration_s": {
+        "ok": true,
+        "n_weeks": 103,
+        "bins": [
+          {
+            "rep_duration_s_range": [
+              216.86,
+              241.13
+            ],
+            "rep_duration_s_mean": 230.58,
+            "mean_delta_rep_ef_next_weeks": -0.00034,
+            "n_weeks": 21
+          },
+          {
+            "rep_duration_s_range": [
+              241.2,
+              266.67
+            ],
+            "rep_duration_s_mean": 252.75,
+            "mean_delta_rep_ef_next_weeks": -0.00051,
+            "n_weeks": 21
+          },
+          {
+            "rep_duration_s_range": [
+              266.74,
+              282.91
+            ],
+            "rep_duration_s_mean": 275.55,
+            "mean_delta_rep_ef_next_weeks": -9e-05,
+            "n_weeks": 21
+          },
+          {
+            "rep_duration_s_range": [
+              283.27,
+              307.1
+            ],
+            "rep_duration_s_mean": 291.98,
+            "mean_delta_rep_ef_next_weeks": 0.00101,
+            "n_weeks": 20
+          },
+          {
+            "rep_duration_s_range": [
+              307.36,
+              388.91
+            ],
+            "rep_duration_s_mean": 329.89,
+            "mean_delta_rep_ef_next_weeks": 0.0002,
+            "n_weeks": 20
+          }
+        ],
+        "best_bin": {
+          "rep_duration_s_range": [
+            283.27,
+            307.1
+          ],
+          "rep_duration_s_mean": 291.98,
+          "mean_delta_rep_ef_next_weeks": 0.00101,
+          "n_weeks": 20
+        },
+        "correlation_r": 0.134,
+        "correlation_p_approx": 0.175
+      },
+      "n_reps": {
+        "ok": true,
+        "n_weeks": 103,
+        "bins": [
+          {
+            "n_reps_range": [
+              2.0,
+              4.25
+            ],
+            "n_reps_mean": 3.45,
+            "mean_delta_rep_ef_next_weeks": 0.00053,
+            "n_weeks": 21
+          },
+          {
+            "n_reps_range": [
+              4.38,
+              5.5
+            ],
+            "n_reps_mean": 4.96,
+            "mean_delta_rep_ef_next_weeks": -0.00054,
+            "n_weeks": 21
+          },
+          {
+            "n_reps_range": [
+              5.54,
+              6.38
+            ],
+            "n_reps_mean": 5.97,
+            "mean_delta_rep_ef_next_weeks": 0.00032,
+            "n_weeks": 21
+          },
+          {
+            "n_reps_range": [
+              6.44,
+              6.92
+            ],
+            "n_reps_mean": 6.64,
+            "mean_delta_rep_ef_next_weeks": 0.00026,
+            "n_weeks": 20
+          },
+          {
+            "n_reps_range": [
+              6.94,
+              10.02
+            ],
+            "n_reps_mean": 7.54,
+            "mean_delta_rep_ef_next_weeks": -0.00037,
+            "n_weeks": 20
+          }
+        ],
+        "best_bin": {
+          "n_reps_range": [
+            2.0,
+            4.25
+          ],
+          "n_reps_mean": 3.45,
+          "mean_delta_rep_ef_next_weeks": 0.00053,
+          "n_weeks": 21
+        },
+        "correlation_r": -0.046,
+        "correlation_p_approx": 0.6467
+      }
+    },
+    "threshold_ge_9min": {
+      "ok": false,
+      "reason": "мало тренировок в подвыборке 'threshold(9+ мин)' (1, нужно >= 12)",
+      "n_sessions": 1
+    },
+    "caveat": "то же самое предупреждение, что и у volume_ef_response (квантильные корзины по перекрывающимся неделям, correlation_p_approx не учитывает автокорреляцию) — плюс дополнительный риск для подвыборки threshold_ge_9min: если реальных тренировок 9+ минут на рабочий отрезок мало (см. n_sessions), корреляция по интерполированным неделям может быть статистическим артефактом почти без реального сигнала — смотрите на n_sessions и n_real_weeks_with_data, а не только на r/p."
+  },
+  "training_effect_response": {
+    "ok": true,
+    "method": "недельная агрегация (без сезонной детрендировки EF, интерполяция недель без измерений): доза 1 — сумма aerobic_training_effect за неделю по ВСЕМ тренировкам vs Δ EF(easy); доза 2 — средний aerobic_training_effect на качественных (interval/threshold/mixed) vs Δ EF(interval); доза 3 — средний anaerobic_training_effect на качественных vs Δ EF(interval); скользящее окно 4 нед., горизонт 4 нед., корзины квантильные по 5.",
+    "n_activities_with_training_effect": 682,
+    "aerobic_te_sum_all_vs_easy_ef": {
+      "ok": true,
+      "n_weeks": 103,
+      "bins": [
+        {
+          "aerobic_te_sum_weekly_range": [
+            4.7,
+            15.52
+          ],
+          "aerobic_te_sum_weekly_mean": 12.66,
+          "mean_delta_ef_next_weeks": 0.03321,
+          "n_weeks": 21
+        },
+        {
+          "aerobic_te_sum_weekly_range": [
+            16.17,
+            17.9
+          ],
+          "aerobic_te_sum_weekly_mean": 17.05,
+          "mean_delta_ef_next_weeks": 0.00561,
+          "n_weeks": 21
+        },
+        {
+          "aerobic_te_sum_weekly_range": [
+            17.98,
+            20.82
+          ],
+          "aerobic_te_sum_weekly_mean": 19.38,
+          "mean_delta_ef_next_weeks": 0.02138,
+          "n_weeks": 21
+        },
+        {
+          "aerobic_te_sum_weekly_range": [
+            20.9,
+            23.98
+          ],
+          "aerobic_te_sum_weekly_mean": 22.55,
+          "mean_delta_ef_next_weeks": 0.02591,
+          "n_weeks": 20
+        },
+        {
+          "aerobic_te_sum_weekly_range": [
+            24.0,
+            26.47
+          ],
+          "aerobic_te_sum_weekly_mean": 25.29,
+          "mean_delta_ef_next_weeks": -0.04097,
+          "n_weeks": 20
+        }
+      ],
+      "best_bin": {
+        "aerobic_te_sum_weekly_range": [
+          4.7,
+          15.52
+        ],
+        "aerobic_te_sum_weekly_mean": 12.66,
+        "mean_delta_ef_next_weeks": 0.03321,
+        "n_weeks": 21
+      },
+      "correlation_r": -0.153,
+      "correlation_p_approx": 0.1187,
+      "n_real_weeks_with_data": 107,
+      "n_sessions": 399
+    },
+    "aerobic_te_mean_quality_vs_interval_ef": {
+      "ok": true,
+      "n_weeks": 103,
+      "bins": [
+        {
+          "aerobic_te_mean_weekly_range": [
+            3.15,
+            3.78
+          ],
+          "aerobic_te_mean_weekly_mean": 3.59,
+          "mean_delta_ef_next_weeks": -0.01835,
+          "n_weeks": 21
+        },
+        {
+          "aerobic_te_mean_weekly_range": [
+            3.78,
+            3.93
+          ],
+          "aerobic_te_mean_weekly_mean": 3.86,
+          "mean_delta_ef_next_weeks": -0.00538,
+          "n_weeks": 21
+        },
+        {
+          "aerobic_te_mean_weekly_range": [
+            3.93,
+            4.07
+          ],
+          "aerobic_te_mean_weekly_mean": 3.99,
+          "mean_delta_ef_next_weeks": 0.02859,
+          "n_weeks": 21
+        },
+        {
+          "aerobic_te_mean_weekly_range": [
+            4.08,
+            4.25
+          ],
+          "aerobic_te_mean_weekly_mean": 4.16,
+          "mean_delta_ef_next_weeks": 0.01495,
+          "n_weeks": 20
+        },
+        {
+          "aerobic_te_mean_weekly_range": [
+            4.26,
+            4.76
+          ],
+          "aerobic_te_mean_weekly_mean": 4.41,
+          "mean_delta_ef_next_weeks": 0.00068,
+          "n_weeks": 20
+        }
+      ],
+      "best_bin": {
+        "aerobic_te_mean_weekly_range": [
+          3.93,
+          4.07
+        ],
+        "aerobic_te_mean_weekly_mean": 3.99,
+        "mean_delta_ef_next_weeks": 0.02859,
+        "n_weeks": 21
+      },
+      "correlation_r": 0.056,
+      "correlation_p_approx": 0.5751,
+      "n_real_weeks_with_data": 94,
+      "n_sessions": 213
+    },
+    "anaerobic_te_mean_quality_vs_interval_ef": {
+      "ok": true,
+      "n_weeks": 103,
+      "bins": [
+        {
+          "anaerobic_te_mean_weekly_range": [
+            0.55,
+            1.27
+          ],
+          "anaerobic_te_mean_weekly_mean": 1.0,
+          "mean_delta_ef_next_weeks": 0.03453,
+          "n_weeks": 21
+        },
+        {
+          "anaerobic_te_mean_weekly_range": [
+            1.33,
+            1.51
+          ],
+          "anaerobic_te_mean_weekly_mean": 1.42,
+          "mean_delta_ef_next_weeks": -0.00064,
+          "n_weeks": 21
+        },
+        {
+          "anaerobic_te_mean_weekly_range": [
+            1.52,
+            1.78
+          ],
+          "anaerobic_te_mean_weekly_mean": 1.65,
+          "mean_delta_ef_next_weeks": 0.00076,
+          "n_weeks": 21
+        },
+        {
+          "anaerobic_te_mean_weekly_range": [
+            1.79,
+            2.11
+          ],
+          "anaerobic_te_mean_weekly_mean": 1.94,
+          "mean_delta_ef_next_weeks": -0.02618,
+          "n_weeks": 20
+        },
+        {
+          "anaerobic_te_mean_weekly_range": [
+            2.13,
+            2.68
+          ],
+          "anaerobic_te_mean_weekly_mean": 2.39,
+          "mean_delta_ef_next_weeks": 0.01053,
+          "n_weeks": 20
+        }
+      ],
+      "best_bin": {
+        "anaerobic_te_mean_weekly_range": [
+          0.55,
+          1.27
+        ],
+        "anaerobic_te_mean_weekly_mean": 1.0,
+        "mean_delta_ef_next_weeks": 0.03453,
+        "n_weeks": 21
+      },
+      "correlation_r": -0.062,
+      "correlation_p_approx": 0.5298,
+      "n_real_weeks_with_data": 94,
+      "n_sessions": 213
+    },
+    "caveat": "Training Effect — готовая оценка Garmin/Firstbeat (не пересчитывается нами), шкала грубая (шаг 0.1, много повторяющихся/нулевых значений на anaerobic), поэтому корреляции здесь ожидаемо слабее и шумнее, чем у quality_rep_response (длина/длительность отрезка в метрах/секундах — непрерывная величина). Такое же предупреждение про автокорреляцию скользящих недель и интерполяцию, как у volume_ef_response/quality_rep_response — смотрите на n_sessions/n_real_weeks_with_data, не только на r/p."
   },
   "systemic_fatigue": {
     "ok": true,
@@ -450,7 +924,7 @@
         "tau_fatigue_days": 1.0,
         "k": 0.0,
         "baseline": 55.271,
-        "r2": 0.0,
+        "r2": -0.0,
         "n_points": 737,
         "hit_bound": true,
         "label": "HRV (за ночь)",
@@ -461,7 +935,7 @@
       },
       "rhr": {
         "ok": true,
-        "tau_fatigue_days": 1.0,
+        "tau_fatigue_days": 15.0,
         "k": 0.0,
         "baseline": 44.765,
         "r2": -0.0,
@@ -476,9 +950,9 @@
       "body_battery_drained": {
         "ok": true,
         "tau_fatigue_days": 1.0,
-        "k": 0.056197,
-        "baseline": 47.166,
-        "r2": 0.157,
+        "k": 0.132689,
+        "baseline": 46.868,
+        "r2": 0.162,
         "n_points": 750,
         "hit_bound": true,
         "label": "Body Battery, потрачено",
@@ -490,9 +964,9 @@
       "stress_avg": {
         "ok": true,
         "tau_fatigue_days": 1.0,
-        "k": 0.00978,
-        "baseline": 23.123,
-        "r2": 0.022,
+        "k": 0.019452,
+        "baseline": 23.282,
+        "r2": 0.016,
         "n_points": 750,
         "hit_bound": true,
         "label": "Стресс, средний",
@@ -503,26 +977,26 @@
       },
       "training_readiness_score": {
         "ok": true,
-        "tau_fatigue_days": 2.0,
-        "k": 0.186198,
-        "baseline": 91.757,
-        "r2": 0.415,
+        "tau_fatigue_days": 1.9,
+        "k": 0.397012,
+        "baseline": 87.716,
+        "r2": 0.354,
         "n_points": 750,
         "hit_bound": false,
         "label": "Training Readiness",
         "independent": false,
         "fit_quality": "IDENTIFIED",
-        "tau_fatigue_used": 2.0,
+        "tau_fatigue_used": 1.9,
         "shrinkage_weight": 1.0
       },
       "sleep_score": {
         "ok": true,
-        "tau_fatigue_days": 1.0,
+        "tau_fatigue_days": 10.0,
         "k": 0.0,
         "baseline": 85.155,
         "r2": -0.0,
         "n_points": 736,
-        "hit_bound": false,
+        "hit_bound": true,
         "label": "Скор сна",
         "independent": true,
         "fit_quality": "UNIDENTIFIED",
@@ -532,9 +1006,9 @@
       "skin_temp_deviation_c": {
         "ok": true,
         "tau_fatigue_days": 1.0,
-        "k": 4e-06,
+        "k": 0.0,
         "baseline": 0.002,
-        "r2": 0.0,
+        "r2": -0.0,
         "n_points": 627,
         "hit_bound": true,
         "label": "Отклонение темп. кожи (ночь)",
@@ -545,12 +1019,12 @@
       },
       "sleep_spo2_avg": {
         "ok": true,
-        "tau_fatigue_days": 10.0,
-        "k": 0.00133,
-        "baseline": 95.195,
-        "r2": 0.033,
+        "tau_fatigue_days": 9.4,
+        "k": 0.002545,
+        "baseline": 94.957,
+        "r2": 0.025,
         "n_points": 674,
-        "hit_bound": true,
+        "hit_bound": false,
         "label": "SpO2 (сон, средний)",
         "independent": true,
         "fit_quality": "UNIDENTIFIED",
@@ -559,10 +1033,10 @@
       },
       "avg_sleep_stress": {
         "ok": true,
-        "tau_fatigue_days": 1.0,
+        "tau_fatigue_days": 10.0,
         "k": 0.0,
         "baseline": 17.297,
-        "r2": -0.0,
+        "r2": 0.0,
         "n_points": 738,
         "hit_bound": true,
         "label": "Стресс во время сна",
@@ -578,9 +1052,9 @@
       "reason": "ни одна независимая метрика (HRV/RHR/Body Battery/стресс/сон) не дала IDENTIFIED/WEAK фита — используется дефолт, модель не меняем на основании шума."
     },
     "training_readiness_check": {
-      "tau_fatigue_days": 2.0,
+      "tau_fatigue_days": 1.9,
       "fit_quality": "IDENTIFIED",
-      "r2": 0.415,
+      "r2": 0.354,
       "diff_vs_independent_aggregate_days": null,
       "note": "СПРАВОЧНО, не источник калибровки (Training Readiness сам построен на нагрузке/HRV/сне/стрессе алгоритмом Garmin — см. докстринг п.8а). Большое расхождение с aggregate — не обязательно ошибка независимых метрик, скорее сигнал, что алгоритм Garmin взвешивает вход иначе, чем наша модель."
     },
@@ -598,9 +1072,9 @@
       "ok": true,
       "source": "endurance_axis_proxy",
       "source_axis": "endurance",
-      "tau_fatigue_used": 7.1,
-      "fit_quality": "WEAK",
-      "note": "impact_load_direct_fit недоступен/недостоверен (impactLoad ни разу не пришёл ни на одной активности в БД — экспортёр получил None на всех activities (проверить --dump-activity-fields на свежей тренировке)) — используется старый endurance-осевой прокси."
+      "tau_fatigue_used": 5.0,
+      "fit_quality": "UNIDENTIFIED",
+      "note": "impact_load_direct_fit недоступен/недостоверен (UNIDENTIFIED) — используется старый endurance-осевой прокси."
     },
     "systemic": {
       "ok": false,
@@ -624,6 +1098,8 @@
     "recovery_response_readiness (dose-response по load дня напрямую на Training Readiness) — R² выше, чем у recovery_nonlinearity (0.10-0.15 против ~0.04), но остаётся одномерным по объёму: не учитывает тип тренировки/ось стимула отдельно, только суммарный дневной load. Взаимодействие load_above_bp_x_acwr статистически значимо, но знак нестабилен при смене спецификации — не использовать как единственный источник для dose-response объёма без дополнительной проверки на бóльшей выборке. Кроме того, сама Training Readiness — не независимая метрика (см. докстринг п.8а), так что этот блок ближе к 'насколько мы воспроизводим алгоритм Garmin', чем к прямой физиологической калибровке.",
     "GEN_W (веса генератора вариантов тренировки, architecture.md §10) — этот скрипт НЕ калибрует gain=10 и подобные веса напрямую. Правильный путь — historical replay: для каждой реальной тренировки атлета сгенерировать правдоподобные альтернативы на ту же дату по текущей модели, посчитать им score(A/B/...), и требовать, чтобы score фактически выбранной/выполненной тренировки был выше правдоподобных альтернатив; GEN_W далее оптимизируется как параметр этой задачи ранжирования (например логистическая/hinge-функция потерь на парах 'фактическая > альтернатива'). Это отдельный скрипт (нужны: генератор альтернатив из текущего калькулятора планов + история фактических тренировок), не реализован здесь.",
     "EF как прокси формы (см. докстринг п.3) искажается температурой/рельефом/покрытием/ветром/обезвоживанием/точностью GPS/изменением веса — сезонная поправка (п.6) убирает только годовой цикл погоды, но не рельеф конкретной пробежки и не разовые погодные аномалии. Grade-adjusted поправка по elevation_gain_m/elevation_loss_m теперь ЕСТЬ (см. ef_grade_adjusted/п.6б, включена по умолчанию, --no-grade-adjust отключает) — но это грубая эвристика 'эквивалентная дистанция' (GRADE_ADJUST_METERS_UP/DOWN), не полноценная Minetti-модель по профилю градиента (для неё нужен поминутный профиль высоты, которого в экспорте нет). Treadmill_running из поправки ИСКЛЮЧЁН принципиально (см. докстринг grade_adjusted_distance_m). Ещё НЕ сделано в этой версии: фильтрация manual_activity=1/elevation_corrected=0 из фита по рельефу, учёт avg_temperature_c как доп. регрессора наравне с сезонной поправкой (п.6), учёт water_estimated_ml (обезвоживание) — все три поля в БД уже есть (см. п.14 garmin_activities_export.py), но не подключены к фиту. Покрытие (trail/road/track) и влажность/ветер Garmin по-прежнему не отдаёт вообще.",
-    "volume_ef_response (объём/ACWR -> будущее изменение EF, см. блок выше) — квантильные корзины по перекрывающимся недельным окнам, не formal регрессия с учётом автокорреляции; correlation_p_approx оптимистична (не учитывает, что соседние недели сильно скоррелированы между собой). decline_threshold — эвристика 'первая корзина снизу с устойчиво отрицательным Δ EF', не статистический breakpoint-тест. Использовать как ориентир (диапазон, а не точное число), пересчитывать при появлении новых данных, не подставлять bins напрямую как hard constraint в калькулятор без здравого смысла."
+    "volume_ef_response (объём/ACWR -> будущее изменение EF, см. блок выше) — квантильные корзины по перекрывающимся недельным окнам, не formal регрессия с учётом автокорреляции; correlation_p_approx оптимистична (не учитывает, что соседние недели сильно скоррелированы между собой). decline_threshold — эвристика 'первая корзина снизу с устойчиво отрицательным Δ EF', не статистический breakpoint-тест. Использовать как ориентир (диапазон, а не точное число), пересчитывать при появлении новых данных, не подставлять bins напрямую как hard constraint в калькулятор без здравого смысла.",
+    "quality_rep_response (длина/длительность рабочего отрезка и число повторов -> Δ EF рабочих отрезков, см. блок выше) — до фикса lap_type_key в garmin_activities_export.py (2026-08-12) вся таблица intervals экспортировалась с lap_type=NULL, поэтому реконструкция работает на эвристике по дистанции/темпу лапов (reconstruct_reps), а не на реальной разметке Garmin ACTIVE/REST/WARMUP/COOLDOWN — переэкспортируй историю (повторный запуск garmin_activities_export.py за тот же период перезапишет intervals с реальным lap_type) для более надёжного результата. Подвыборка threshold_ge_9min особенно чувствительна к этому: если n_sessions там мало (см. сам блок), correlation_r/p посчитаны в основном по интерполированным неделям и могут быть статистическим артефактом.",
+    "training_effect_response (Garmin/Firstbeat aerobic/anaerobic TE -> Δ EF, см. блок выше) — готовая оценка Garmin, не наша величина: шкала грубая (шаг 0.1), поэтому даже там, где correlation_p_approx проходит порог 0.05, величина эффекта (r) обычно слабее, чем у quality_rep_response на тех же тренировках. EF здесь БЕЗ сезонной детрендировки — не сравнивайте r/p напрямую с axes/volume_ef_response (там она есть)."
   ]
 }
