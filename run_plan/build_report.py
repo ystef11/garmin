@@ -18,7 +18,7 @@ max_hr/rest_hr/sex (calib['meta']['load_params']) — если не переда
 ВАЖНО
 1. калибровка дорожки: distance_m/avg_pace_s_per_km для sport=='treadmill_running'
 корректируются коэффициентом из fit_treadmill_pace_calibration() ДО всех остальных расчётов —
-это влияет на объём (п.1), EF/VDOT (п.3a), ACWR по км (п.4b), поиск оптимального пульса (п.7),
+это влияет на объём (п.7), EF/VDOT (п.4), ACWR по км (п.9), поиск оптимального пульса (п.2),
 темп по зонам (п.8, п.9). Коррекция применяется и к activities, и к intervals (лапам).
 2. калибровка сезонности ДО всех остальных расчётов
 """
@@ -37,6 +37,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib.patches import Patch
 
 plt.rcParams["figure.facecolor"] = "white"
 plt.rcParams["axes.facecolor"] = "white"
@@ -59,7 +60,7 @@ TYPE_LABELS_RU = {
     "marathon_tempo": "марафонские отрезки",
 }
 
-# Рекомендуемое распределение по пульсовым зонам для разных целевых дистанций (раздел 5 и
+# Рекомендуемое распределение по пульсовым зонам для разных целевых дистанций (раздел 12 и
 # интерактивный график render_zone_distance_comparison). Идея: чем короче дистанция, тем
 # больше доля высокой интенсивности (Z4/Z5); чем длиннее (особенно ультра) — тем больше доля
 # чистой аэробной базы (Z1/Z2), а "гоночный/специфичный темп" (Z3) смещается вниз, потому что
@@ -131,6 +132,12 @@ def load_data(db_path, json_path=None):
     lt = pd.read_sql_query(
         "SELECT * FROM lactate_threshold ORDER BY date", conn, parse_dates=["date"]
     )
+    # wellness.rhr — нужен для карвоненовских (%HRR) пульсовых зон (см. build_zones, диалог
+    # 2026-08-18): резерв пульса = max_hr - rhr, а не только max_hr, как раньше.
+    wellness = pd.read_sql_query(
+        "SELECT date, rhr FROM wellness WHERE rhr IS NOT NULL ORDER BY date", conn,
+        parse_dates=["date"]
+    )
     conn.close()
 
     calib = {}
@@ -138,7 +145,7 @@ def load_data(db_path, json_path=None):
         with open(json_path, encoding="utf-8") as f:
             calib = json.load(f)
 
-    return activities, intervals, lt, calib
+    return activities, intervals, lt, wellness, calib
 
 
 # --------------------------------------------------------------------------
@@ -271,6 +278,62 @@ def apply_treadmill_calibration(activities, intervals, tc):
     return activities, intervals, info
 
 
+def apply_grade_adjustment(activities, intervals):
+    """Делает темп с учётом уклона (GAP, Garmin-овское avg_grade_adjusted_pace_s_per_km)
+    ОСНОВНЫМ значением avg_pace_s_per_km для ВСЕХ дальнейших расчётов (HR-эффективность,
+    построение зон/оптимального пульса лёгких, детекция срыва темпа на гонке, decoupling,
+    классификация рабочих отрезков, темп по зонам и т.п.) — и на уровне лапов, и на уровне
+    активности в целом.
+
+    Зачем централизованно, а не точечно в отдельных функциях: на холмистой трассе (у нас
+    медиана ~11 м/км суммарного набора+сброса на км) до 44% лапов расходятся с GAP больше
+    чем на 5 с/км, до 17% — больше чем на 10 с/км. Без коррекции рельеф подмешивается в
+    любой анализ, где темп используется как прокси усилия/усталости, и любая новая метрика,
+    написанная "как обычно" через avg_pace_s_per_km, унаследует этот шум. Централизация здесь
+    гарантирует, что новый код по умолчанию получает уже очищенный от рельефа темп.
+
+    GAP есть только для уличных пробежек (sport == 'running'; на дорожке/indoor уклона нет,
+    Garmin туда GAP не пишет). Где GAP отсутствует (дорожка, indoor, старые записи без него) —
+    остаётся обычный (откалиброванный для дорожки) темп, поведение не меняется.
+
+    Исходный "плоский" темп (без поправки на уклон, но с учётом калибровки дорожки) сохраняется
+    в avg_pace_s_per_km_flat — используем его там, где нужен именно реальный, "как было
+    показано на часах" темп (например, отображение в таблицах для человека), а не темп как
+    прокси физиологического усилия."""
+    activities = activities.copy()
+    intervals = intervals.copy()
+
+    activities["avg_pace_s_per_km_flat"] = activities["avg_pace_s_per_km"]
+    if "avg_grade_adjusted_pace_s_per_km" in activities.columns:
+        mask = activities["avg_grade_adjusted_pace_s_per_km"].notna()
+        activities.loc[mask, "avg_pace_s_per_km"] = activities.loc[mask, "avg_grade_adjusted_pace_s_per_km"]
+        n_act_adjusted = int(mask.sum())
+    else:
+        n_act_adjusted = 0
+
+    intervals["avg_pace_s_per_km_flat"] = intervals["avg_pace_s_per_km"]
+    if "avg_grade_adjusted_pace_s_per_km" in intervals.columns:
+        mask_iv = intervals["avg_grade_adjusted_pace_s_per_km"].notna()
+        intervals.loc[mask_iv, "avg_pace_s_per_km"] = intervals.loc[mask_iv, "avg_grade_adjusted_pace_s_per_km"]
+        n_iv_adjusted = int(mask_iv.sum())
+    else:
+        n_iv_adjusted = 0
+
+    info = {
+        "n_activities_adjusted": n_act_adjusted,
+        "n_activities_total": int(len(activities)),
+        "n_laps_adjusted": n_iv_adjusted,
+        "n_laps_total": int(len(intervals)),
+        "note": (
+            f"avg_pace_s_per_km переведён на grade-adjusted pace (GAP) везде, где он есть "
+            f"({n_act_adjusted}/{len(activities)} активностей, {n_iv_adjusted}/{len(intervals)} "
+            f"лапов — все уличные пробежки). Плоский темп сохранён в avg_pace_s_per_km_flat "
+            f"для отображения."
+        ),
+    }
+    return activities, intervals, info
+
+
 # --------------------------------------------------------------------------
 # СЕЗОННАЯ КАЛИБРОВКА EF (портировано из garmin_calibration_fit.py, seasonal_detrend)
 # --------------------------------------------------------------------------
@@ -346,16 +409,18 @@ def weekly_volume(activities):
     return wk
 
 
-def plot_weekly_volume(wk_km):
+def plot_weekly_volume(wk_km, xlim=None):
     fig, ax = plt.subplots(figsize=(11, 3.2))
     ax.bar(wk_km.index, wk_km.values, width=5.5, color="#3B7DD8", alpha=0.85)
     roll4 = wk_km.rolling(4, min_periods=1).mean()
     ax.plot(roll4.index, roll4.values, color="#1A3A5C", linewidth=2, label="Скольз. 4-нед. среднее")
-    ax.set_title("1. Объём бега по неделям (км, с учётом калибровки дорожки)")
+    ax.set_title("7. Объём бега по неделям (км, с учётом калибровки дорожки)")
     ax.set_ylabel("км/неделю")
     ax.legend(loc="upper left", fontsize=8)
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+    if xlim:
+        ax.set_xlim(*xlim)
     fig.autofmt_xdate()
     return fig_to_base64(fig)
 
@@ -365,23 +430,42 @@ def plot_weekly_volume(wk_km):
 # --------------------------------------------------------------------------
 
 MARATHON_PACE_BAND_S_PER_KM = (285, 335)  # см. диалог: фактический темп гонок Утрехт (299) и
-                                           # Гронинген (317) — реальный марафонский темп атлета
+                                           # Гронинген (317) — реальный марафонский темп атлета;
+                                           # используется для темповых/интервальных вставок (см.
+                                           # interval_threshold_vdot_points и т.п.), но БОЛЬШЕ НЕ
+                                           # для marathon_time_per_activity (см. ниже, диалог
+                                           # 2026-08-20 — статичный темповый коридор не подходит
+                                           # для тренировок из периодов с другой формой).
 
 
-def marathon_time_per_activity(activities, intervals, pace_band=MARATHON_PACE_BAND_S_PER_KM):
-    """Для каждой тренировки считает суммарную длительность лапов внутри long/easy с темпом,
-    совпадающим с фактическим марафонским темпом (285-335 с/км, по факту гонок Утрехт/Гронинген,
-    после калибровки дорожки) — это и есть настоящие марафонские вставки внутри длительных/лёгких
-    тренировок (см. диалог). НЕ по пульсовой зоне Z3: та зона (140-159 после калибровки) намного
-    шире и захватывает вообще любой умеренно-тяжёлый бег (например, снос пульса к концу длинной),
-    а не именно осознанную вставку марафонского темпа."""
+def marathon_time_per_activity(activities, intervals, zones):
+    """Для каждой тренировки считает суммарную длительность лапов внутри long/easy с пульсом
+    внутри HR-зоны 'Z3 — марафонский темп' (см. build_zones) — это и есть марафонские вставки
+    внутри длительных/лёгких тренировок.
+
+    ИЗМЕНЕНО 2026-08-20 (см. диалог, тренировка 21872979699 от 2026-02-15): раньше отбор шёл по
+    ФИКСИРОВАННОМУ темповому коридору MARATHON_PACE_BAND_S_PER_KM (285-335 с/км), откалиброванному
+    по фактическому темпу недавних гонок (Утрехт 299, Гронинген 317). Эта тренировка — 191 минута
+    с устойчивым пульсом 142-160 (то есть по сути ровно Z3) весь забег, темп при этом 346-420 с/км —
+    полностью МИМО фиксированного коридора, потому что в феврале 2026 (при более низкой форме, см.
+    рост VDOT с ~31 до ~48 за 2 года) 'усилие уровня марафона' физически означало заметно более
+    медленный абсолютный темп. Статичный темповый коридор, один на всю двухлетнюю историю, такие
+    тренировки из периодов другой формы систематически не ловит. Пульсовая зона Z3 (в отличие от
+    темпового коридора) НЕ завязана на конкретный темп — она сама уже подстроена под этого атлета
+    (Карвонен %HRR + ПАНО, см. build_zones), поэтому одинаково применима к любому периоду истории.
+
+    Темповые/интервальные вставки (не марафонские) по-прежнему считаются по темповым коридорам
+    (MARATHON_PACE_BAND_S_PER_KM и др. — см. interval_threshold_vdot_points и т.п.) — решение
+    менять именно и только marathon_time_per_activity, см. диалог 2026-08-20."""
+    z3 = next(z for z in zones if z[0].startswith("Z3"))
+    hr_lo, hr_hi = z3[1], z3[2]
     iv = intervals[
         intervals["activity_id"].isin(
             activities.loc[activities["type_guess"].isin(["long", "easy"]), "activity_id"]
         ) &
-        intervals["avg_pace_s_per_km"].notna() &
-        (intervals["avg_pace_s_per_km"] >= pace_band[0]) &
-        (intervals["avg_pace_s_per_km"] <= pace_band[1]) &
+        intervals["avg_hr"].notna() &
+        (intervals["avg_hr"] >= hr_lo) &
+        (intervals["avg_hr"] <= hr_hi) &
         (intervals["distance_m"] > 300)
     ]
     per_act = iv.groupby("activity_id")["duration_s"].sum().rename("marathon_time_s")
@@ -390,12 +474,12 @@ def marathon_time_per_activity(activities, intervals, pace_band=MARATHON_PACE_BA
     return out.set_index("activity_id")["marathon_time_s"]
 
 
-def weekly_type_shares(activities, intervals):
+def weekly_type_shares(activities, intervals, zones):
     df = activities.copy()
     df["week"] = df["date"].dt.to_period("W-SUN").apply(lambda p: p.start_time)
     df["type_g"] = df["type_guess"].fillna("unknown")
 
-    mara = marathon_time_per_activity(activities, intervals)
+    mara = marathon_time_per_activity(activities, intervals, zones)
     df = df.merge(mara.rename("marathon_time_s"), on="activity_id", how="left")
     df["marathon_time_s"] = df["marathon_time_s"].fillna(0.0)
     df["type_duration_s"] = df["duration_s"] - df["marathon_time_s"]  # остаток исходного типа
@@ -411,7 +495,7 @@ def weekly_type_shares(activities, intervals):
     return shares
 
 
-def plot_weekly_type_shares(shares):
+def plot_weekly_type_shares(shares, xlim=None):
     fig, ax = plt.subplots(figsize=(11, 3.2))
     preferred = ["easy", "long", "marathon_tempo", "threshold", "interval", "mixed"]
     cols = [c for c in preferred if c in shares.columns]
@@ -420,12 +504,14 @@ def plot_weekly_type_shares(shares):
     colors = [TYPE_COLORS.get(c, "#999999") for c in cols]
     ax.stackplot(shares.index, [shares[c].values * 100 for c in cols],
                  labels=[TYPE_LABELS_RU.get(c, c) for c in cols], colors=colors, alpha=0.85)
-    ax.set_title("2. Доля типов тренировок по неделям, включая марафонские отрезки (% от времени)")
+    ax.set_title("10. Доли типов тренировок по неделям, включая марафонские отрезки (% от времени)")
     ax.set_ylabel("%")
     ax.set_ylim(0, 100)
     ax.legend(loc="upper left", ncol=6, fontsize=7.5, bbox_to_anchor=(0, 1.28))
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+    if xlim:
+        ax.set_xlim(*xlim)
     fig.autofmt_xdate()
     return fig_to_base64(fig)
 
@@ -458,6 +544,62 @@ def garmin_pano_estimate(lt, recent_days=120):
     }
 
 
+def estimate_resting_hr(wellness, recent_days=90, fallback_rhr=None):
+    """Пульс покоя для карвоненовского резерва (%HRR) — среднее wellness.rhr за последние
+    recent_days дней от последней записи (устойчивее разового замера, тот же приём, что и
+    garmin_pano_estimate). Если wellness пуст/недоступен — fallback_rhr (например, из
+    calib['meta']['load_params']), а если и его нет — дефолт 50."""
+    df = wellness[wellness["rhr"].notna()].copy() if wellness is not None and len(wellness) else pd.DataFrame()
+    if not len(df):
+        rhr = fallback_rhr if fallback_rhr else 50
+        return rhr, {"source": "fallback", "n": 0}
+    cutoff = df["date"].max() - pd.Timedelta(days=recent_days)
+    recent = df[df["date"] >= cutoff]
+    if not len(recent):
+        recent = df
+    rhr = float(recent["rhr"].mean())
+    return rhr, {
+        "source": "wellness.rhr",
+        "n": int(len(recent)),
+        "window_days": recent_days,
+        "last_date": df["date"].max().strftime("%Y-%m-%d"),
+        "mean": round(rhr, 1),
+    }
+
+
+def estimate_max_hr(activities, fallback_max_hr=None, abs_ceiling=215, max_spread=60):
+    """Устойчивая оценка max_hr — защита от разовых выбросов датчика (см. диалог 2026-08-18:
+    на одной из баз найден max_hr=230 при avg_hr=153 в 'лёгкой' тредмильной тренировке — разрыв
+    77 уд/мин, физиологически невозможный скачок на фоне низкого среднего усилия; типичный
+    артефакт оптического пульсометра на запястье от вибрации тредмила).
+
+    Берём max(max_hr) НЕ по всем тренировкам подряд, а только по тем, где:
+      1) max_hr <= abs_ceiling (215 — почти никто не превышает это даже в молодости/спринте);
+      2) разрыв (max_hr - avg_hr) в пределах одной тренировки <= max_spread (60 уд/мин) —
+         больший разрыв на фоне общего среднего пульса тренировки означает, что пик, скорее
+         всего, не 'заработан' самой тренировкой, а является выбросом.
+    Порог max_spread=60 подобран так, чтобы не резать легитимные фартлек/интервальные тренировки
+    с большими перепадами (разброс там обычно до ~45-50), но отсекать явные скачки вроде
+    230/153=77.
+
+    Если после фильтра не осталось валидных значений — fallback_max_hr (например, из
+    calibration_profile), иначе дефолт 195, как и раньше."""
+    df = activities.dropna(subset=["avg_hr", "max_hr"]).copy()
+    if len(df):
+        df["spread"] = df["max_hr"] - df["avg_hr"]
+        clean = df[(df["max_hr"] <= abs_ceiling) & (df["spread"] <= max_spread)]
+    else:
+        clean = df
+    if len(clean):
+        max_hr = int(round(clean["max_hr"].max()))
+        n_excluded = len(df) - len(clean)
+        return max_hr, {"source": "activities.max_hr (после фильтра выбросов)",
+                         "n_excluded": int(n_excluded)}
+    if fallback_max_hr:
+        return int(round(fallback_max_hr)), {"source": "fallback", "n_excluded": 0}
+    return 195, {"source": "default", "n_excluded": 0}
+
+
 def pano_table(activities, min_hr=None):
     # Только НЕПРЕРЫВНЫЕ эффорты (не интервальная структура с паузами/восстановлением):
     # type_guess == 'threshold' — единственная категория, где алгоритм фиксирует устойчивое
@@ -476,11 +618,12 @@ def pano_table(activities, min_hr=None):
         (activities["type_guess"] == "threshold")
     ].copy()
     df = df.sort_values("date")
-    out = df[["date", "name", "avg_hr", "avg_pace_s_per_km", "duration_s"]].copy()
+    out = df[["date", "name", "avg_hr", "avg_pace_s_per_km_flat", "duration_s"]].copy()
     out["Дата"] = out["date"].dt.strftime("%Y-%m-%d")
     out["Название"] = out["name"]
     out["Пульс"] = out["avg_hr"].astype(int)
-    out["Темп"] = out["avg_pace_s_per_km"].apply(fmt_pace)
+    # реальный (плоский) темп для человека — GAP тут был бы контринтуитивен в таблице
+    out["Темп"] = out["avg_pace_s_per_km_flat"].apply(fmt_pace)
     out["Длительность"] = (out["duration_s"] / 60).round(0).astype(int).astype(str) + " мин"
     out = out[["Дата", "Название", "Пульс", "Темп", "Длительность"]]
     pano_estimate = df["avg_hr"].mean() if len(df) else np.nan
@@ -493,7 +636,7 @@ def pano_table(activities, min_hr=None):
 
 def compute_easy_ef(activities):
     """Единая точка расчёта EF для лёгких пробежек — с сезонной поправкой (см. add_seasonally_adjusted_ef).
-    Используется и для тренда EF (п.3a), и для поиска пика эффективности по пульсу (п.7), чтобы
+    Используется и для тренда EF (п.4), и для поиска пика эффективности по пульсу (п.2), чтобы
     оба расчёта были на одних и тех же (сезонно скорректированных) числах."""
     easy = activities[
         (activities["type_guess"] == "easy") &
@@ -636,7 +779,8 @@ def race_vdot_points(activities, pano, intervals=None):
            excluded[["date", "name", "distance_m", "duration_s", "avg_hr", "pct_of_pano", "min_pct_required"]]
 
 
-def interval_threshold_vdot_points(activities, intervals, min_conf=0.15):
+def interval_threshold_vdot_points(activities, intervals, pano=None, min_conf=0.15,
+                                    pano_corr_a=-44.841, pano_corr_b=40.973, pano_corr_clip=0.20):
     """Вспомогательная (гораздо более шумная, чем гоночная) оценка VDOT по интервальным и
     пороговым тренировкам — заполняет пробелы там, где гонок не было вовсе (см. диалог —
     январь 2026: провал EF/объёма без единой гонки рядом, оценить изменение формы в моменте
@@ -661,13 +805,30 @@ def interval_threshold_vdot_points(activities, intervals, min_conf=0.15):
        к одному шумному лапу, чем среднее). Итоговая достоверность тренировки = средний вес лапов,
        дополнительно штрафуется, если сами лапы сильно расходятся между собой по VDOT (большой
        разброс = ненадёжная тренировка, а не стабильный маркер формы).
-    4. Финальный робастный отброс экстремумов по ВСЕЙ серии точек (устойчивый MAD-фильтр,
+    4. Поправка на фактический % от ПАНО рабочих лапов (см. диалог, тест на реальных данных
+       пользователя, 2026-08-18): формула Дэниэлса предполагает устойчивое состояние VO2,
+       а рабочие отрезки интервальной/пороговой тренировки часто бегутся заметно ниже порога
+       (пульс не успевает/не должен подняться до ПАНО на коротких повторах). Сравнение с
+       эталонной кривой VDOT по гонкам (линейная интерполяция по времени) на 207 точках этого
+       пользователя показало сильную корреляцию (r=0.57) между заниженностью точки и средним
+       pct_of_pano рабочих лапов: <80% ПАНО -> occasion занижение на ~16 очков VDOT, 95-100% ПАНО
+       -> ~4 очка. Линейная поправка resid = a + b*pct_of_pano, обученная на первых 70% точек по
+       времени и проверенная на последних 30% (не участвовавших в подборе a/b), снизила RMSE
+       относительно гоночной кривой с 10.1 до 6.5 (~35%) на данных, которые модель не видела —
+       то есть эффект не переобучение. Поправка применяется только если передан pano (иначе
+       пропускается, чтобы вызов без pano не ломался — обратная совместимость), и ограничена
+       клипом +-pano_corr_clip от величины VDOT точки (по умолчанию 20%), чтобы не улетать в
+       крайности на разреженных/нетипичных тренировках. Коэффициенты a/b подобраны один раз по
+       истории конкретного пользователя (см. диалог) — если тренировочный профиль сильно
+       изменится (новый вид часов/датчика пульса, другая калибровка ПАНО), их стоит переоценить
+       заново по актуальным данным, а не считать раз и навсегда верными.
+    5. Финальный робастный отброс экстремумов по ВСЕЙ серии точек (устойчивый MAD-фильтр,
        не долевой IQR) — не точка-по-точке против гонок, а против медианы самих интервальных
        точек, чтобы не потерять реальные периоды провала/подъёма формы, а только выкинуть сбои
        (GPS/пульсометр, случайно размеченная тренировка).
 
     Возвращает DataFrame: date, name, vdot, weight (0..1, для размера/прозрачности маркера),
-    n_work_laps. Пустой DataFrame, если пригодных точек нет.
+    n_work_laps, pct_of_pano (NaN, если pano не передан). Пустой DataFrame, если пригодных точек нет.
 
     ВАЖНО (см. диалог): раньше здесь стоял фильтр type_guess.isin(['interval','threshold']) —
     это ОШИБКА, которую поймал пользователь. Жёсткие отрезки (пикапы, фартлек-вставки,
@@ -703,7 +864,7 @@ def interval_threshold_vdot_points(activities, intervals, min_conf=0.15):
         if not len(work):
             continue
 
-        raw_vdots, weights = [], []
+        raw_vdots, weights, hrs = [], [], []
         for _, lap in work.iterrows():
             dur = lap["duration_s"]
             vdot = daniels_vdot(lap["distance_m"], dur)
@@ -721,6 +882,7 @@ def interval_threshold_vdot_points(activities, intervals, min_conf=0.15):
                 vdot *= 0.95
             raw_vdots.append(vdot)
             weights.append(w)
+            hrs.append(lap["avg_hr"])
 
         raw_vdots = np.array(raw_vdots)
         weights = np.array(weights)
@@ -739,9 +901,20 @@ def interval_threshold_vdot_points(activities, intervals, min_conf=0.15):
         if conf < min_conf:
             continue
 
+        # поправка на % от ПАНО рабочих лапов (см. докстринг, п.4) — только если pano передан
+        pct_of_pano = np.nan
+        if pano:
+            avg_hr_work = float(np.average(hrs, weights=weights))
+            pct_of_pano = avg_hr_work / pano
+            correction = pano_corr_a + pano_corr_b * pct_of_pano
+            correction = float(np.clip(correction, -vdot_point * pano_corr_clip,
+                                        vdot_point * pano_corr_clip))
+            vdot_point = vdot_point - correction  # resid = vdot - ref, поэтому вычитаем поправку
+
         points.append({
             "date": act["date"], "name": act["name"], "vdot": vdot_point,
             "weight": min(conf, 1.0), "n_work_laps": int(len(work)),
+            "pct_of_pano": pct_of_pano,
         })
 
     df = pd.DataFrame(points)
@@ -756,7 +929,7 @@ def interval_threshold_vdot_points(activities, intervals, min_conf=0.15):
     return df.sort_values("date").reset_index(drop=True)
 
 
-def plot_ef_vdot(wk_ef_roll, races, interval_points=None):
+def plot_ef_vdot(wk_ef_roll, races, interval_points=None, xlim=None):
     fig, ax1 = plt.subplots(figsize=(11, 4.1))
     ax1.plot(wk_ef_roll.index, wk_ef_roll.values, color="#4C9F70", linewidth=2, label="EF (лёгкий бег, сезонно скорр., скольз. 4нед.)")
     ax1.set_ylabel("EF (скорость/пульс)", color="#4C9F70")
@@ -791,9 +964,11 @@ def plot_ef_vdot(wk_ef_roll, races, interval_points=None):
     ax2.set_ylabel("VDOT", color="#E0574C")
     ax2.tick_params(axis="y", labelcolor="#E0574C")
 
-    ax1.set_title("3a. Динамика EF (лёгкий бег) и VDOT (по гонкам, формула Дэниэлса)")
+    ax1.set_title("4. Динамика EF (лёгкий бег) и VDOT (по гонкам, формула Дэниэлса)")
     ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
     ax1.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+    if xlim:
+        ax1.set_xlim(*xlim)
     fig.autofmt_xdate()
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
@@ -812,7 +987,7 @@ def plot_ef_vdot(wk_ef_roll, races, interval_points=None):
 # ни где-либо ещё). Единственный собственный фитнес-показатель Гармина, который
 # ЕСТЬ в базе — это история ПАНО (таблица lactate_threshold, считается Гармином через
 # Firstbeat по фактическим тренировкам). Строим из неё VO2max-эквивалент по той же
-# формуле Дэниэлса, что и VDOT по гонкам (п.3a), считая ПАНО эффортом, устойчивым ~60 мин
+# формуле Дэниэлса, что и VDOT по гонкам (п.4), считая ПАНО эффортом, устойчивым ~60 мин
 # — это стандартное допущение в спортивной физиологии (Jack Daniels, Joe Friel), но это
 # ОЦЕНКА, а не собственно внутреннее число Гармина, которое в выгрузке отсутствует.
 
@@ -831,17 +1006,22 @@ def garmin_vo2max_proxy(lt):
     return df
 
 
-def plot_garmin_vo2max(lt_vo2):
+def plot_garmin_vo2max(lt_vo2, xlim=None):
     fig, ax = plt.subplots(figsize=(11, 3.2))
     if len(lt_vo2):
         ax.plot(lt_vo2["date"], lt_vo2["vo2max_proxy"], color="#8C2A22", linewidth=1.6, marker="o", markersize=3)
         roll = lt_vo2.set_index("date")["vo2max_proxy"].rolling(5, min_periods=1).mean()
         ax.plot(roll.index, roll.values, color="#1A3A5C", linewidth=2, label="Скольз. среднее (5 точек)")
-    ax.set_title("3b. VO2max-прокси по истории ПАНО Garmin (поля vo2max нет в выгрузке — см. примечание)")
+    ax.set_title("5. VO2max-прокси по истории ПАНО Garmin (поля vo2max нет в выгрузке — см. примечание)")
     ax.set_ylabel("VO2max, мл/кг/мин (оценка)")
     ax.legend(loc="upper left", fontsize=8)
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+    if xlim:
+        # история ПАНО в Garmin обычно короче полной истории тренировок (см. диалог 2026-08-20
+        # про единую временную ось всех графиков) — здесь данные не заполняют весь диапазон,
+        # это ожидаемо, а не ошибка; xlim только выравнивает ось с остальными графиками отчёта.
+        ax.set_xlim(*xlim)
     fig.autofmt_xdate()
     return fig_to_base64(fig)
 
@@ -852,7 +1032,7 @@ def plot_garmin_vo2max(lt_vo2):
 # См. диалог: изначально здесь стоял фильтр type_guess.isin(['interval','threshold']) и
 # делался вывод про "почти полное отсутствие тренировок" в ноябре 2025 - феврале 2026. Это
 # было ДВОЙНОЙ ОШИБКОЙ, которую поймал пользователь по факту: (1) общий недельный объём бега
-# в этот период на самом деле был нормальным, местами 60-80 км/нед (см. п.1) — не "почти нулевой";
+# в этот период на самом деле был нормальным, местами 60-80 км/нед (см. п.7) — не "почти нулевой";
 # (2) рабочие/жёсткие отрезки (пикапы, фартлек, марафонский темп) сплошь и рядом сидят ВНУТРИ
 # тренировок, размеченных как 'long'/'easy'/'mixed' — фильтр по type_guess их отсекал и занижал
 # реальный объём качественной работы. Правильно — искать рабочие отрезки во ВСЕХ тренировках
@@ -904,6 +1084,36 @@ def weekly_quality_training_frequency(activities, intervals):
     return weekly
 
 
+# Те же множества типов лап, что и LAP_ACTIVE_TYPES/LAP_REST_TYPES в garmin_activities_export.py
+# (classify()) — продублированы здесь, чтобы build_report.py не тянул зависимость от экспортёра.
+# Если множества там поменяются — поправить и здесь.
+LAP_ACTIVE_TYPES = {"INTERVAL_ACTIVE", "ACTIVE", "INTERVAL", "REPEAT", "WORK"}
+LAP_REST_TYPES = {"INTERVAL_REST", "RECOVERY", "REST", "RECOVERY_ACTIVE"}
+
+
+def _merge_continuous_work_blocks(iv_sorted):
+    """Склеивает подряд идущие типизированные Garmin work-лапы (без rest-лапа между ними, т.е.
+    без разрыва на отдых) в непрерывные рабочие блоки — тот же приём, что и в classify()
+    (garmin_activities_export.py, см. диалог 2026-08-20: Garmin дополнительно бьёт один
+    непрерывный отрезок автолапами по километру). iv_sorted — лапы ОДНОЙ тренировки в
+    хронологическом порядке (по idx). Возвращает список {duration_s, avg_hr} — avg_hr взвешен
+    по длительности лапов внутри блока."""
+    blocks = []
+    cur_dur, cur_hr_weighted = 0.0, 0.0
+    for _, lap in iv_sorted.iterrows():
+        if lap["lap_type"] in LAP_ACTIVE_TYPES:
+            cur_dur += lap["duration_s"]
+            if pd.notna(lap["avg_hr"]):
+                cur_hr_weighted += lap["avg_hr"] * lap["duration_s"]
+        else:
+            if cur_dur:
+                blocks.append({"duration_s": cur_dur, "avg_hr": cur_hr_weighted / cur_dur if cur_dur else np.nan})
+            cur_dur, cur_hr_weighted = 0.0, 0.0
+    if cur_dur:
+        blocks.append({"duration_s": cur_dur, "avg_hr": cur_hr_weighted / cur_dur if cur_dur else np.nan})
+    return blocks
+
+
 def detect_quality_work_laps(activities, intervals, min_dur_s=90, max_dur_s=1800):
     """Единая детекция 'качественных' рабочих отрезков, используемая ВЕЗДЕ, где отчёт говорит о
     структурированной работе (3c и 3d) — раньше 3c детектировал рабочие лапы так, а 3d (доля
@@ -912,24 +1122,54 @@ def detect_quality_work_laps(activities, intervals, min_dur_s=90, max_dur_s=1800
     жары/дрейфа/рельефа заходил в ту же HR-зону, что и целевая пороговая работа, "разбавляли"
     факт и маскировали реальную нехватку структурированного стимула (см. диалог).
 
-    Критерий тот же, что был в 3c: тренировка с CV темпа лапов >= 0.06 (иначе рабочие/
-    восстановительные отрезки не отделить), лапа быстрее медианы лапов ЭТОЙ тренировки минимум
-    на 6%, а физическая длительность лапы — от min_dur_s до max_dur_s (короче — спринт/шум,
-    длиннее — уже гоночный/длительный темп, а не целевая интервальная/пороговая работа).
+    ИЗМЕНЕНО 2026-08-20 (см. диалог, тренировка 23536204499 'Порог 2x20'' от 2026-07-09,
+    id 23536204499): если Garmin сам типизировал лапы (work/rest) — это теперь ПРИОРИТЕТНЫЙ
+    источник, ТЕ ЖЕ правила, что и в classify() (garmin_activities_export.py): подряд идущие
+    typed work-лапы без rest между ними склеиваются в непрерывные блоки (см.
+    _merge_continuous_work_blocks). Без этого CV-эвристика по медиане либо теряла такую
+    тренировку целиком (когда работа — БОЛЬШИНСТВО сессии, как в этом примере: 10 из 18 валидных
+    лапов ACTIVE — медиана темпа тренировки сама оказывается близко к темпу работы, и порог
+    'быстрее медианы на 6%' никогда не срабатывает, раздел 8/11 показывали 0 обнаруженных
+    рабочих лапов, хотя раздел 10 по type_guess уже корректно относит её к threshold), либо
+    дробила непрерывный 20-минутный блок на 5 отдельных км-автолапов вместо одного цельного
+    порогового блока. CV-эвристика по медиане (прежний критерий: CV темпа лапов >= 0.06, лапа
+    быстрее медианы минимум на 6%) остаётся ТОЛЬКО фолбэком — для тренировок БЕЗ типизации
+    Гармином (ручные/авто-лапы без разметки work/rest), где typed-путь неприменим.
 
-    Возвращает DataFrame с одной строкой на обнаруженную рабочую лапу: activity_id, week,
-    duration_s, avg_hr (пульс лапы — нужен для классификации по зоне в 3d)."""
+    Возвращает DataFrame с одной строкой на обнаруженный рабочий лап/блок: activity_id, week,
+    duration_s, avg_hr (нужен для классификации по зоне в 3d)."""
     candidates = activities[activities["avg_hr"].notna()].copy()
     candidates["week"] = candidates["date"].dt.to_period("W-SUN").apply(lambda p: p.start_time)
 
     rows = []
     for _, act in candidates.iterrows():
-        iv = intervals[
-            (intervals["activity_id"] == act["activity_id"]) &
-            intervals["avg_hr"].notna() & intervals["avg_pace_s_per_km"].notna() &
-            (intervals["distance_m"] >= 150) &
-            (intervals["duration_s"] >= 30) &
-            (intervals["avg_pace_s_per_km"] < 900)
+        iv_all = intervals[intervals["activity_id"] == act["activity_id"]]
+        if "idx" in iv_all.columns:
+            iv_all = iv_all.sort_values("idx")
+        typed_active = iv_all[iv_all["lap_type"].isin(LAP_ACTIVE_TYPES)]
+        typed_rest = iv_all[iv_all["lap_type"].isin(LAP_REST_TYPES)]
+
+        if len(typed_active) >= 2 and len(typed_rest) >= 1:
+            # Гармин сам типизировал структуру — используем её напрямую (склейка блоков),
+            # без CV-эвристики по медиане (см. докстринг выше).
+            for block in _merge_continuous_work_blocks(iv_all):
+                dur = block["duration_s"]
+                if dur < min_dur_s or dur > max_dur_s:
+                    continue
+                rows.append({
+                    "activity_id": act["activity_id"],
+                    "week": act["week"],
+                    "duration_s": dur,
+                    "avg_hr": block["avg_hr"],
+                })
+            continue
+
+        # Фолбэк: нет типизации Гармином — прежняя CV-эвристика по медиане темпа.
+        iv = iv_all[
+            iv_all["avg_hr"].notna() & iv_all["avg_pace_s_per_km"].notna() &
+            (iv_all["distance_m"] >= 150) &
+            (iv_all["duration_s"] >= 30) &
+            (iv_all["avg_pace_s_per_km"] < 900)
         ]
         if len(iv) < 3:
             continue
@@ -991,7 +1231,7 @@ def weekly_mpk_threshold_minutes(activities, intervals, mpk_max_s=360, threshold
     return piv[["mpk_min", "threshold_min", "mpk_min_roll", "threshold_min_roll"]]
 
 
-def plot_weekly_quality_frequency(weekly, weekly_mpk_thr=None):
+def plot_weekly_quality_frequency(weekly, weekly_mpk_thr=None, xlim=None):
     fig, ax1 = plt.subplots(figsize=(11, 3.8))
     if len(weekly):
         ax1.bar(weekly.index, weekly["n_sessions"], width=5, color="#9B6BC7", alpha=0.28,
@@ -1013,9 +1253,11 @@ def plot_weekly_quality_frequency(weekly, weekly_mpk_thr=None):
     ax2.set_ylabel("Минут качественной работы/неделю", color="#333333")
     ax2.tick_params(axis="y", labelcolor="#333333")
 
-    ax1.set_title("3c. Частота качественных тренировок и МПК/пороговая работа по неделям")
+    ax1.set_title("8. Частота качественных тренировок и МПК/пороговая работа по неделям")
     ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
     ax1.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+    if xlim:
+        ax1.set_xlim(*xlim)
     fig.autofmt_xdate()
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
@@ -1049,11 +1291,11 @@ def compute_acwr(activities):
     return acwr_load, acwr_km
 
 
-def plot_acwr(acwr_load, acwr_km):
+def plot_acwr(acwr_load, acwr_km, xlim=None):
     fig, axes = plt.subplots(2, 1, figsize=(11, 5.2), sharex=True)
     for ax, series, title, color in [
-        (axes[0], acwr_load, "4a. ACWR по Garmin training load (7д/28д)", "#E0574C"),
-        (axes[1], acwr_km, "4b. ACWR по объёму (км, с учётом калибровки дорожки, 7д/28д)", "#3B7DD8"),
+        (axes[0], acwr_load, "9а. ACWR по Garmin training load (7д/28д)", "#E0574C"),
+        (axes[1], acwr_km, "9б. ACWR по объёму (км, с учётом калибровки дорожки, 7д/28д)", "#3B7DD8"),
     ]:
         ax.plot(series.index, series.values, color=color, linewidth=1.2)
         ax.axhspan(0.8, 1.3, color="green", alpha=0.08)
@@ -1065,6 +1307,11 @@ def plot_acwr(acwr_load, acwr_km):
         ax.legend(loc="upper left", fontsize=7)
     axes[1].xaxis.set_major_locator(mdates.MonthLocator(interval=2))
     axes[1].xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+    if xlim:
+        # daily-ряд ACWR (7д/28д) начинается/заканчивается на 1 день уже, чем недельные графики
+        # отчёта (см. compute_acwr: reindex по daily_load.index.min()/max(), а не по общей
+        # недельной сетке) — xlim выравнивает ось с остальными графиками (см. диалог 2026-08-20).
+        axes[0].set_xlim(*xlim)
     fig.autofmt_xdate()
     fig.tight_layout()
     return fig_to_base64(fig)
@@ -1140,7 +1387,7 @@ def plot_easy_ef_by_hr(g, peak_center, peak_found, mean_col="mean"):
     for _, row in g.iterrows():
         ax.text(row["hrbin"] + 2, row[mean_col] + 0.15, f"n={int(row['count'])}", ha="center", fontsize=7)
     title_suffix = "с учётом калибровки дорожки и сезонности"
-    ax.set_title(f"7. Эффективность (EF) медленного бега в зависимости от пульса ({title_suffix})")
+    ax.set_title(f"2а. Эффективность (EF) медленного бега в зависимости от пульса ({title_suffix})")
     ax.set_xlabel("Пульс, уд/мин (бины по 5)")
     ax.set_ylabel("EF (скорость/пульс, сезонно скорр.)")
     if peak_found:
@@ -1154,21 +1401,203 @@ def plot_easy_ef_by_hr(g, peak_center, peak_found, mean_col="mean"):
 
 
 # --------------------------------------------------------------------------
+# 6b. ПРОДОЛЬНАЯ ПРОВЕРКА: ПУЛЬС НА EASY (ВРЕМЯ ПОД НАГРУЗКОЙ, БЕЗ ТЕМПА) vs ОТКЛИК ФОРМЫ
+# --------------------------------------------------------------------------
+# См. диалог 2026-08-18: гипотеза "зимой лёгкие/восстановительные бежались на завышенном
+# пульсе, что предшествовало провалу формы янв-май 2026". easy_ef_by_hr() выше — КРОСС-
+# СЕКЦИОННЫЙ метод (экономичность прямо сейчас при разном пульсе, в один момент времени);
+# у этого атлета он часто не находит пика (EF~HR плоская, peak_found=False) и тогда падает
+# в медиану пульса ЗА ВСЮ ИСТОРИЮ — а медиана как раз загрязнена периодами вроде зимы
+# 2025-2026, где пульс на лёгких был завышен. Функция ниже — ПРОДОЛЬНАЯ проверка: связан ли
+# пульс на easy (взвешенный по времени под нагрузкой, а НЕ по темпу) в квартале с изменением
+# формы (пороговый темп из lactate_threshold, ниже = лучше) в СЛЕДУЮЩЕМ квартале. Даёт
+# независимую, основанную на исходе, оценку потолка ЧСС — используется как страховка от
+# fallback-медианы, когда пика EF нет.
+#
+# ЧЕСТНО О ГРАНИЦАХ МЕТОДА (проверено на всей истории 2024-07..2026-08): прямая линейная
+# корреляция "% от ПАНО -> Δ темпа в следующем квартале" слабая (~0.04) на всех 8 точках —
+# слишком мало кварталов и слишком много других факторов (объём, гонки, тейпер), чтобы это
+# было строгим доказательством причинности. Но есть устойчивый локальный паттерн: единственный
+# двухквартальный провал формы (2025Q3->2025Q4, оба ~81-82% от ПАНО при рекордном объёме) и
+# лучший разворот формы за весь период (2026Q2, ~76% от ПАНО, рекордный порог) — так что как
+# качественная поправка к fallback-медиане метод оправдан, как самостоятельное строгое
+# доказательство — нет. Текст в отчёте ниже отражает эту оговорку явно.
+
+def easy_hr_fitness_response(easy, lt, pano_final, min_activities_per_q=3, min_quarters=4):
+    """Квартальная агрегация: взвешенный по duration_s пульс 'easy' (то же множество, что и
+    easy_ef_by_hr/compute_easy_ef — в гарминовской type_guess это уже recovery+лёгкие вместе)
+    против среднего порогового темпа Гармина (lactate_threshold) в ЭТОМ и СЛЕДУЮЩЕМ квартале.
+
+    Возвращает (df, info, resp_ceiling_hr). info=None и resp_ceiling_hr=None, если данных
+    недостаточно для содержательного вывода (см. min_quarters) — в этом случае вызывающий код
+    должен просто не показывать блок и не трогать easy_center."""
+    e = easy.dropna(subset=["avg_hr", "duration_s", "date"]).copy()
+    e = e[e["avg_hr"] > 60]
+    if e.empty:
+        return pd.DataFrame(), None, None
+    e["q"] = e["date"].dt.to_period("Q")
+
+    lt2 = lt.dropna(subset=["threshold_hr", "threshold_pace_s_per_km", "date"]).copy()
+    if lt2.empty:
+        return pd.DataFrame(), None, None
+    lt2["q"] = lt2["date"].dt.to_period("Q")
+    lt_q = lt2.groupby("q").agg(thr_hr=("threshold_hr", "mean"),
+                                 thr_pace=("threshold_pace_s_per_km", "mean"))
+
+    q = e.groupby("q").apply(lambda x: pd.Series({
+        "n": len(x),
+        "load_min": x["duration_s"].sum() / 60.0,
+        "weighted_hr": np.average(x["avg_hr"], weights=x["duration_s"]),
+    }))
+    q = q[q["n"] >= min_activities_per_q]
+
+    df = q.join(lt_q, how="inner").sort_index()
+    if len(df) < min_quarters:
+        return df, None, None
+
+    df["pct_pano"] = df["weighted_hr"] / pano_final * 100.0
+    df["thr_pace_next"] = df["thr_pace"].shift(-1)
+    df["delta_next"] = df["thr_pace_next"] - df["thr_pace"]
+
+    valid = df.dropna(subset=["delta_next"])
+    corr = None
+    if len(valid) >= 4 and valid["pct_pano"].std() > 0 and valid["delta_next"].std() > 0:
+        corr = float(np.corrcoef(valid["pct_pano"], valid["delta_next"])[0, 1])
+
+    improved = valid[valid["delta_next"] < 0]
+    worsened = valid[valid["delta_next"] >= 0]
+
+    # Потолок ЧСС: медиана % от ПАНО в кварталах, ПОСЛЕ которых форма росла (медиана, а не
+    # минимум/среднее — устойчивее к единичному выбросу). Только если таких кварталов хотя бы 2,
+    # иначе оценка недостаточно надёжна, чтобы на неё опираться.
+    resp_ceiling_pct = float(improved["pct_pano"].median()) if len(improved) >= 2 else None
+    resp_ceiling_hr = int(round(resp_ceiling_pct / 100.0 * pano_final)) if resp_ceiling_pct else None
+
+    info = {
+        "corr": corr,
+        "n_quarters_valid": len(valid),
+        "n_improved": len(improved),
+        "n_worsened": len(worsened),
+        "resp_ceiling_pct": resp_ceiling_pct,
+        "resp_ceiling_hr": resp_ceiling_hr,
+    }
+    return df, info, resp_ceiling_hr
+
+
+def plot_hr_fitness_response(df):
+    """Столбец = пульс на лёгких/восстановительных В ЭТОМ квартале (подпись над столбцом —
+    сам пульс в уд/мин, взвешенный по времени под нагрузкой, БЕЗ учёта темпа; высота столбца —
+    он же, в % от ПАНО, чтобы разброс между кварталами было видно на глаз). Цвет столбца — что
+    произошло с формой ПОСЛЕ него, в следующем квартале. Линия (правая ось, перевёрнута: ниже
+    в секундах = быстрее = лучше форма) — пороговый темп Гармина в ЭТОМ ЖЕ квартале, для которого
+    посчитан столбец; чтобы увидеть ЭФФЕКТ (что было дальше), нужно сравнить цвет столбца текущего
+    квартала со следующей точкой линии.
+
+    Автомасштаб оси столбцов зумит на фактический разброс данных (а не от нуля) — иначе на всех
+    этих 8 кварталах разница в 10-15 п.п. % от ПАНО почти не видна. Легенда вынесена ПОД график
+    (fig.legend, а не ax.legend поверх осей) — раньше перекрывала столбцы."""
+    fig, ax1 = plt.subplots(figsize=(11, 4.2))
+    x = np.arange(len(df))
+    labels = [str(p) for p in df.index]
+
+    colors = []
+    for d in df["delta_next"]:
+        if pd.isna(d):
+            colors.append("#B0B0B0")
+        elif d < 0:
+            colors.append("#4C9F70")
+        else:
+            colors.append("#8C2A22")
+
+    bars = ax1.bar(x, df["pct_pano"], color=colors, width=0.6, zorder=3)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
+    ax1.set_ylabel("Пульс на easy, % от ПАНО\n(взвеш. по времени под нагрузкой, БЕЗ учёта темпа)",
+                    fontsize=8.5)
+    fig.suptitle("2б. Пульс на лёгких/восстановительных по кварталам (столбцы, левая ось)\n"
+                 "и пороговый темп Гармина (линия, правая ось)", fontsize=10, y=1.04)
+
+    # автомасштаб: зум на фактический разброс % от ПАНО, а не от 0 — иначе колебания незаметны
+    lo, hi = df["pct_pano"].min(), df["pct_pano"].max()
+    pad = max(2.0, (hi - lo) * 0.25)
+    ax1.set_ylim(lo - pad, hi + pad * 1.6)  # запас сверху побольше — там подписи пульса в уд/мин
+
+    for xi, row in zip(x, bars):
+        hr_val = df["weighted_hr"].iloc[xi]
+        ax1.text(xi, row.get_height() + pad * 0.25, f"{hr_val:.0f} уд/мин",
+                  ha="center", fontsize=7.5)
+
+    ax2 = ax1.twinx()
+    line, = ax2.plot(x, df["thr_pace"], color="#2C5F8C", marker="o", linewidth=1.5, zorder=4)
+    ax2.set_ylabel("Пороговый темп Garmin, с/км (ниже = лучше форма)", color="#2C5F8C")
+    ax2.invert_yaxis()
+    ax2.tick_params(axis="y", colors="#2C5F8C")
+
+    legend_el = [
+        Patch(facecolor="#4C9F70", label="цвет столбца: дальше форма росла (порог быстрее)"),
+        Patch(facecolor="#8C2A22", label="цвет столбца: дальше форма стагнировала/ухудшалась"),
+        Patch(facecolor="#B0B0B0", label="следующего квартала пока нет в данных"),
+        line,
+    ]
+    line.set_label("пороговый темп в этом же квартале (правая ось)")
+    fig.legend(handles=legend_el, loc="upper center", bbox_to_anchor=(0.5, 0.02),
+               ncol=2, fontsize=7.5, frameon=False)
+    fig.tight_layout(rect=[0, 0.14, 0.94, 0.92])
+    return fig_to_base64(fig)
+
+
+# --------------------------------------------------------------------------
 # 7. ПУЛЬСОВЫЕ ЗОНЫ + АКТУАЛЬНЫЙ ТЕМП (последние 4-8 недель, диапазон)
 # --------------------------------------------------------------------------
 
-def build_zones(easy_center, pano, max_hr):
+def build_zones(rhr, pano, max_hr, z1_hrr=0.50, z2_hrr=0.60, z3_hrr=0.70):
     """
-    Z2 центрирована на easy_center (оптимум эффективности медленного бега).
-    Z4 верхняя граница = ПАНО.
-    Промежуток между Z2 и Z4 делится пополам на Z3.
-    max_hr больше не хардкодится (было 195) — берётся из calibration_profile
-    (meta.load_params.max_hr, см. main()), это собственное поле Гармина/профиля атлета.
+    Z1/Z2/Z3 нижние границы — по Карвонену (%HRR = резерв пульса = max_hr - rhr), а не
+    center±6, как раньше (см. диалог 2026-08-18). Причина смены метода:
+
+    1. Прежний easy_center брался либо из пика EF~HR (кросс-секционная экономичность), либо,
+       когда пика нет (частый случай для этого атлета — EF практически плоская), из медианы
+       пульса ВСЕЙ 'easy'-выборки Гармина (type_guess=='easy' объединяет recovery+лёгкие).
+       Медиана смеси двух разных по интенсивности популяций — это не центр ни одной из них,
+       а точка где-то на стыке между ними; center±6 после такой медианы давал слишком узкую
+       и сдвинутую вниз Z2 (см. жалобу пользователя: реальная практика "лёгких" ~142-144
+       уд/мин не попадала во вторую зону вообще).
+    2. Разбивать выборку по названию тренировки ("Recovery"/"Easy") тоже нельзя — это
+       использовало бы прежние предположения о зонах как вход для построения новых зон
+       (circular reasoning).
+    3. Проверено два независимых способа, не использующих ярлыки: (a) форма распределения
+       пульса (взвешенная по времени под нагрузкой KDE, вход только пульс) — устойчиво (при
+       Scott/Silverman и вручную заданных ширинах окна, после отсечения сенсорных выбросов
+       avg_hr<105) даёт два кластера ~125 и ~145 с разрывом плотности в районе 130-136;
+       (b) бэктест по стандартным методикам (Карвонен %HRR, %MaxHR, Friel/Coggan %LTHR) —
+       доля времени в зоне каждой методики за квартал против изменения порогового темпа
+       Гармина в СЛЕДУЮЩЕМ квартале. Карвоненовская Z2 (60-70% HRR) дала самую заметную (хоть
+       и на n=8 кварталах, не строгую) связь, и её граница Z1/Z2 (~136 при rhr~45, max_hr~196)
+       совпала с независимо найденным разрывом плотности пульса. Оба способа сошлись в одной
+       точке — это и есть обоснование выбора именно Карвонена, а не подгонка под желаемый ответ.
+
+    rhr — пульс покоя (см. estimate_resting_hr, wellness.rhr, скользящее окно 90 дней).
+    max_hr — из calibration_profile (meta.load_params.max_hr) или максимума по БД, как раньше.
+    pano — верхняя граница Z4 (порог), измеренный Гармином (lactate_threshold) — оставлен как
+    измеренная величина, а не % от HRR, потому что это прямой физиологический показатель этого
+    атлета, а не общая формула.
+    z1_hrr/z2_hrr/z3_hrr — пороги %HRR для границ Z1/Z2/Z3 (по умолчанию стандартные
+    50/60/70%, см. диалог 2026-08-18 — z2_hrr=0.60 подтверждён бэктестом на истории этого
+    атлета, z1_hrr/z3_hrr — стандартные значения методики, отдельно на этой истории не
+    перебирались, чтобы не переобучаться на 8 кварталах).
     """
-    z2_half = 6
-    z2_lo, z2_hi = easy_center - z2_half, easy_center + z2_half
-    z1_lo, z1_hi = 100, z2_lo - 1
+    hrr = max_hr - rhr
+
+    def at(pct):
+        return rhr + pct * hrr
+
+    z1_lo = int(round(at(z1_hrr)))
+    z2_lo = int(round(at(z2_hrr)))
+    z3_lo_hrr = int(round(at(z3_hrr)))
+    z1_hi = z2_lo - 1
+
     z4_hi = pano
+    z2_hi = z3_lo_hrr - 1
     z3_lo = z2_hi + 1
     z4_lo = int(round((z3_lo + z4_hi) / 2))
     z3_hi = z4_lo - 1
@@ -1242,7 +1671,7 @@ def zones_table_with_recent_pace(zones, pano, recent_pace_df, weeks_back):
 # --------------------------------------------------------------------------
 # 8. ТЕМП ПО ЗОНАМ В ДИНАМИКЕ (по кварталам, не единое число за 2 года)
 # --------------------------------------------------------------------------
-# За 2 года фитнес поменялся (VDOT плавал от ~31 до ~48, см. п.3a) — усреднять темп по зоне
+# За 2 года фитнес поменялся (VDOT плавал от ~31 до ~48, см. п.4) — усреднять темп по зоне
 # ЗА ВСЮ ИСТОРИЮ в одно число некорректно: это смешивает темп на разных уровнях формы.
 # Вместо статичного среднего показываем темп по зоне ПО КВАРТАЛАМ — это и есть требуемое
 # "смотреть в динамике" (альтернатива VDOT-нормировке, которая по сути давала бы то же самое,
@@ -1287,7 +1716,7 @@ def pace_by_zone_quarterly(intervals, zones, activities):
     return pivot, grouped
 
 
-def plot_pace_by_zone_quarterly(pivot, zones):
+def plot_pace_by_zone_quarterly(pivot, zones, xlim=None):
     fig, ax = plt.subplots(figsize=(11, 4.0))
     zone_colors = {"Z1 — восстановление": "#7FB3E8", "Z2 — лёгкий/аэробный": "#4C9F70",
                    "Z3 — марафонский темп": "#9B6BC7", "Z4 — пороговый (до ПАНО)": "#E0A62C",
@@ -1298,19 +1727,21 @@ def plot_pace_by_zone_quarterly(pivot, zones):
             if len(series) >= 2:
                 ax.plot(series.index, series.values, marker="o", markersize=4,
                         color=zone_colors.get(name), label=name, linewidth=1.8)
-    ax.set_title("9. Темп по пульсовым зонам В ДИНАМИКЕ, по кварталам (интервалы/сплиты, калибровка дорожки)")
+    ax.set_title("6. Темп по пульсовым зонам В ДИНАМИКЕ, по кварталам (интервалы/сплиты, калибровка дорожки)")
     ax.set_ylabel("темп, с/км (меньше = быстрее)")
     ax.invert_yaxis()
     ax.legend(loc="upper right", fontsize=7.5, ncol=2)
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+    if xlim:
+        ax.set_xlim(*xlim)
     fig.autofmt_xdate()
     return fig_to_base64(fig)
 
 
 # --------------------------------------------------------------------------
 # ОБЪЁМ БЕГА -> БУДУЩЕЕ ИЗМЕНЕНИЕ EF (портировано из garmin_calibration_fit.py,
-# analyze_volume_ef_response — используется в разделе 5)
+# analyze_volume_ef_response — используется в разделе 12)
 # --------------------------------------------------------------------------
 # В отличие от оригинала в garmin_calibration_fit.py, здесь оставлена только
 # объёмная (by_rolling_volume_km_per_week) версия анализа — вариант по ACWR
@@ -1318,7 +1749,7 @@ def plot_pace_by_zone_quarterly(pivot, zones):
 # инфраструктуру (daily_total_load/stimulus_map/rest_hr/sex), которая иначе
 # нигде в build_report.py не нужна. Сезонная поправка EF переиспользуется из
 # compute_easy_ef()/add_seasonally_adjusted_ef() (единая точка расчёта EF, см.
-# п.3a/п.7) — считать её заново не нужно.
+# п.4/п.2) — считать её заново не нужно.
 
 def pearsonr_approx(x, y):
     """Коэффициент корреляции + грубая p-value (нормальное приближение t-статистики, без
@@ -1631,14 +2062,14 @@ def render_zone_time_chart(zones, zone_shares_ts, window_weeks):
         {charts_html}
       </div>
       <p class="meta">Сплошная линия — факт (доля недельного объёма, скользящее окно
-      {window_weeks} недель — то же окно, что и в 3c). "Восстановление"/"Лёгкий"/"Марафонский темп"
+      {window_weeks} недель — то же окно, что и в разделе 8). "Восстановление"/"Лёгкий"/"Марафонский темп"
       считаются по пульсовой зоне (как раньше); "Порог" и "МПК" — НЕ по зоне пульса, а по
       физической длительности рабочего отрезка (6-30 мин и ≤6 мин соответственно, та же детекция,
-      что и в 3c) — поэтому "Порог" здесь должен по форме сходиться с оранжевой линией в 3c, а не
+      что и в разделе 8) — поэтому "Порог" здесь должен по форме сходиться с оранжевой линией в разделе 8, а не
       с долей времени в пульсовой зоне Z4 (короткие МПК-интервалы физиологически часто попадают в
       Z4 по пульсу, не успев разогнаться до Z5, и раньше маскировали в HR-зоне провал именно
       длинной пороговой работы — см. диалог 2026-08-17). Пунктирная горизонтальная линия —
-      рекомендуемая доля для выбранной дистанции (см. раздел 5; для "Порог"/"МПК" использована
+      рекомендуемая доля для выбранной дистанции (см. раздел 12; для "Порог"/"МПК" использована
       рекомендация для зон Z4/Z5 соответственно), не меняется во времени, это ориентир, а не факт.
       У каждой категории своя ось Y, масштаб которой пересчитывается под факт и рекомендацию
       именно выбранной дистанции.</p>
@@ -1759,7 +2190,7 @@ def build_text_report(volume_ef_response, zones, current_shares_pct, weeks_back)
     decline = vol.get("decline_threshold")
 
     parts = []
-    parts.append("<h2>5. Оптимальный объём и структура недельного бега</h2>")
+    parts.append("<h2>12. Оптимальный объём и структура недельного бега</h2>")
 
     if not volume_ef_response.get("ok"):
         parts.append(
@@ -1796,7 +2227,7 @@ def build_text_report(volume_ef_response, zones, current_shares_pct, weeks_back)
     parts.append(f"<h3>Текущее фактическое распределение по пульсовым зонам (последние {weeks_back} недель)</h3>")
     parts.append(
         "<p class='meta'>Важно: здесь Z3 — это ВСЁ время с пульсом 140-159, в любых тренировках "
-        "(широкое понятие пульсовой зоны). Это НЕ то же самое, что 'марафонские отрезки' из раздела 2 "
+        "(широкое понятие пульсовой зоны). Это НЕ то же самое, что 'марафонские отрезки' из раздела 10 "
         "(там — узкое понятие: только вставки в темпе 285-335 с/км внутри длительных/лёгких). Пульсовая "
         "зона шире: в неё попадает и снос пульса к концу длинной, и просто умеренно-тяжёлый бег — "
         "поэтому её текущая доля (см. таблицу) заметно больше доли собственно марафонских вставок.</p>"
@@ -1835,7 +2266,7 @@ def build_text_report(volume_ef_response, zones, current_shares_pct, weeks_back)
         "(особенно ультра, 60+ км) → доля Z1/Z2 растёт, а Z3 ('гоночный/специфичный' темп) наоборот "
         "снижается, потому что на ультрах реальный соревновательный темп физиологически является "
         "аэробным, а не 'марафонской' интенсивностью. Колонка 42 км согласована с фактической "
-        "историей тренировок этого атлета (см. таблицу выше и раздел 2 — ограничение доли марафонских "
+        "историей тренировок этого атлета (см. таблицу выше и раздел 10 — ограничение доли марафонских "
         "вставок ~18-20%); остальные дистанции достроены по общепринятой логике периодизации "
         "(Daniels/Pfitzinger для шоссе, стандартная ультра-практика для 60+ км) — это не подгонка "
         "под фактические данные этого атлета на этих дистанциях, а ориентир.</div>"
@@ -1876,7 +2307,7 @@ HTML_TAIL = "</body></html>"
 
 
 def main(db_path, out_path, json_path=None):
-    activities_raw, intervals_raw, lt, calib = load_data(db_path, json_path)
+    activities_raw, intervals_raw, lt, wellness, calib = load_data(db_path, json_path)
 
     # --- калибровка дорожки, ДО всех расчётов ---
     # Коэффициент считается прямо по БД (fit_treadmill_pace_calibration) — calibration_profile.json
@@ -1884,12 +2315,36 @@ def main(db_path, out_path, json_path=None):
     tc = fit_treadmill_pace_calibration(activities_raw)
     activities, intervals, tm_info = apply_treadmill_calibration(activities_raw, intervals_raw, tc)
 
+    # --- коррекция на уклон (GAP), ДО всех расчётов, СРАЗУ после калибровки дорожки ---
+    # С этого момента avg_pace_s_per_km везде далее по пайплайну — это уже темп с учётом уклона
+    # (там, где он доступен, т.е. на уличных пробежках). Реальный "плоский" темп — в
+    # avg_pace_s_per_km_flat. См. docstring apply_grade_adjustment().
+    activities, intervals, gap_info = apply_grade_adjustment(activities, intervals)
+
+    # Единая временная ось для ВСЕХ графиков отчёта (см. диалог 2026-08-20) — раньше каждый
+    # график масштабировал ось X под диапазон СВОИХ данных: например, история ПАНО Гармина
+    # (раздел 5) короче истории тренировок на 1-2 недели с каждой стороны, а дневной ряд ACWR
+    # (раздел 9) на 1 день уже недельной сетки остальных графиков (compute_acwr реиндексируется
+    # по своему daily_load.index.min()/max(), а не по общей сетке недель) — из-за этого при
+    # сравнении графиков друг с другом (одна и та же неделя должна быть в одном и том же месте
+    # по горизонтали) они были на пиксель-два не совпадающими. WEEKLY_XLIM — для недельных/
+    # дневных графиков (объём, доли типов, EF/VDOT, VO2max, качество, ACWR), QUARTERLY_XLIM —
+    # для графика по кварталам (темп по зонам): использовать WEEKLY_XLIM там нельзя — недельная
+    # сетка начинается ПОЗЖЕ первого квартала (2024-07-22 против 2024-07-01), это обрезало бы
+    # первую точку.
+    week_start = activities["date"].min().to_period("W-SUN").start_time
+    week_end = activities["date"].max().to_period("W-SUN").start_time
+    WEEKLY_XLIM = (week_start, week_end)
+    q_start = activities["date"].min().to_period("Q").start_time
+    q_end = activities["date"].max().to_period("Q").start_time
+    QUARTERLY_XLIM = (q_start, q_end)
+
     charts = {}
     tables = {}
 
     # Раздел 1 (объём по неделям)
     wk_km = weekly_volume(activities)
-    charts["1"] = plot_weekly_volume(wk_km)
+    charts["1"] = plot_weekly_volume(wk_km, xlim=WEEKLY_XLIM)
 
     # Раздел 6 (ПАНО): приоритетно из собственной истории Гармина (lactate_threshold, Firstbeat),
     # это прямой показатель Гармина, а не наша реконструкция. pano_table() ниже — по-прежнему
@@ -1920,31 +2375,69 @@ def main(db_path, out_path, json_path=None):
             "по 95-му перцентилю пульса среди всех тренировок."
         )
 
-    # max_hr — из калибровочного профиля (meta.load_params.max_hr), больше не хардкодится (было 195)
-    max_hr = calib.get("meta", {}).get("load_params", {}).get("max_hr")
-    if not max_hr:
-        max_hr = int(round(activities["max_hr"].max())) if activities["max_hr"].notna().any() else 195
+    # max_hr — из калибровочного профиля (meta.load_params.max_hr), если задан вручную; иначе
+    # оценка по самим тренировкам, но НЕ голым activities["max_hr"].max() (см. диалог 2026-08-18:
+    # на одной из баз голый max() давал 230 уд/мин из-за одиночного выброса датчика на тредмиле) —
+    # estimate_max_hr() отсекает разовые скачки, несовместимые с усилием самой тренировки.
+    max_hr_manual = calib.get("meta", {}).get("load_params", {}).get("max_hr")
+    if max_hr_manual:
+        max_hr, max_hr_info = int(max_hr_manual), {"source": "calibration_profile (ручной ввод)", "n_excluded": 0}
+    else:
+        max_hr, max_hr_info = estimate_max_hr(activities)
 
-    # общий расчёт EF лёгких пробежек с сезонной поправкой — используется и в п.3a, и в п.7
+    # общий расчёт EF лёгких пробежек с сезонной поправкой — используется и в п.4, и в п.2
     easy_ef_df, seasonal_info = compute_easy_ef(activities)
 
     # Раздел 7 (оптимальный пульс лёгкого бега) — считаем заранее, он нужен для построения зон
     ef_hr_bins, easy_df, peak_center, peak_found, peak_vertices = easy_ef_by_hr(easy_ef_df, pano=pano_final)
     charts["6"] = plot_easy_ef_by_hr(ef_hr_bins, peak_center, peak_found)
+
+    # Раздел 6b (продольная проверка: пульс на easy по времени под нагрузкой vs отклик формы
+    # в следующем квартале, см. диалог 2026-08-18). Считается независимо от EF-пика — это
+    # страховка для fallback-медианы, а не альтернативный основной метод.
+    hr_resp_df, hr_resp_info, resp_ceiling_hr = easy_hr_fitness_response(easy_ef_df, lt, pano_final)
+    if hr_resp_info is not None:
+        charts["6b"] = plot_hr_fitness_response(hr_resp_df)
+        tables["6b"] = hr_resp_df.reset_index().rename(columns={"index": "q"}).assign(
+            Квартал=lambda d: d["q"].astype(str),
+            **{
+                "ЧСС (взвеш. по времени), уд/мин": hr_resp_df["weighted_hr"].round(1).values,
+                "% от ПАНО": hr_resp_df["pct_pano"].round(1).values,
+                "Объём, мин": hr_resp_df["load_min"].round(0).values,
+                "Пороговый темп, с/км": hr_resp_df["thr_pace"].round(0).values,
+                "Δ темпа в след. кв., с/км": hr_resp_df["delta_next"].round(0).values,
+            }
+        )[["Квартал", "ЧСС (взвеш. по времени), уд/мин", "% от ПАНО", "Объём, мин",
+           "Пороговый темп, с/км", "Δ темпа в след. кв., с/км"]]
+
+    # easy_center — оставлен только как ИНФОРМАЦИОННАЯ точка для раздела 2/2б (пик EF или,
+    # если пика нет, медиана 'easy' по всей истории). Раньше он же использовался как центр Z2
+    # (center±6) — от этого отказались (см. диалог 2026-08-18): медиана смешанной выборки
+    # (type_guess=='easy' объединяет recovery+лёгкие) — это не центр зоны, а точка где-то на
+    # стыке двух разных по интенсивности популяций; center±6 после неё давал слишком узкую и
+    # сдвинутую вниз Z2 (реальная практика "лёгких" ~142-144 не попадала во вторую зону).
+    # Разбивать выборку по названию тренировки ("Recovery"/"Easy") тоже нельзя — это было бы
+    # использованием прежних предположений о зонах как входа для их же построения.
     easy_center = peak_center
 
-    # Пульсовые зоны (используются в разделах 8, 3d и в тексте раздела 5)
-    zones = build_zones(easy_center, pano_final, max_hr)
+    # Пульс покоя — для карвоненовских (%HRR) границ Z1/Z2/Z3 в build_zones (см. её докстринг:
+    # два независимых способа без ярлыков — форма распределения пульса и бэктест по методикам —
+    # сошлись на границе Z1/Z2 ~136 при этом rhr/max_hr, что соответствует Карвонену 60% HRR).
+    fallback_rhr = calib.get("meta", {}).get("load_params", {}).get("rest_hr")
+    rhr, rhr_info = estimate_resting_hr(wellness, fallback_rhr=fallback_rhr)
 
-    # Раздел 2 (доля марафонских отрезков — по темпу, см. marathon_time_per_activity)
-    shares = weekly_type_shares(activities, intervals)
-    charts["2"] = plot_weekly_type_shares(shares)
+    # Пульсовые зоны (используются в разделах 3, 11 и в тексте раздела 12)
+    zones = build_zones(rhr, pano_final, max_hr)
+
+    # Раздел 2 (доля марафонских отрезков — по HR-зоне Z3, см. marathon_time_per_activity)
+    shares = weekly_type_shares(activities, intervals, zones)
+    charts["2"] = plot_weekly_type_shares(shares, xlim=WEEKLY_XLIM)
 
     # Раздел 3a (EF/VDOT по гонкам)
     wk_ef_roll, wk_ef = weekly_ef(easy_ef_df)
     races, excluded_races = race_vdot_points(activities, pano_final, intervals=intervals)
-    interval_vdot_df = interval_threshold_vdot_points(activities, intervals)
-    charts["4a"] = plot_ef_vdot(wk_ef_roll, races, interval_points=interval_vdot_df)
+    interval_vdot_df = interval_threshold_vdot_points(activities, intervals, pano=pano_final)
+    charts["4a"] = plot_ef_vdot(wk_ef_roll, races, interval_points=interval_vdot_df, xlim=WEEKLY_XLIM)
     tables["4a"] = races.assign(
         Дата=races["date"].dt.strftime("%Y-%m-%d"),
         Дистанция=(races["distance_m"] / 1000).round(2).astype(str) + " км",
@@ -1967,15 +2460,15 @@ def main(db_path, out_path, json_path=None):
 
     # Раздел 3b (VO2max-прокси по истории ПАНО Garmin)
     lt_vo2 = garmin_vo2max_proxy(lt)
-    charts["4b"] = plot_garmin_vo2max(lt_vo2)
+    charts["4b"] = plot_garmin_vo2max(lt_vo2, xlim=WEEKLY_XLIM)
 
     # Раздел 3c (частота качественных тренировок + МПК/пороговые минуты по неделям)
     weekly_quality = weekly_quality_training_frequency(activities, intervals)
     weekly_mpk_thr = weekly_mpk_threshold_minutes(activities, intervals)
-    charts["4c"] = plot_weekly_quality_frequency(weekly_quality, weekly_mpk_thr=weekly_mpk_thr)
+    charts["4c"] = plot_weekly_quality_frequency(weekly_quality, weekly_mpk_thr=weekly_mpk_thr, xlim=WEEKLY_XLIM)
 
     # Раздел 3d: интерактивный график факт (в динамике) vs рекомендовано (выбор дистанции). Статичный
-    # срез current_shares для раздела 5 (weeks_back=12) считается отдельно и ниже, здесь он не
+    # срез current_shares для раздела 12 (weeks_back=12) считается отдельно и ниже, здесь он не
     # нужен — 3d показывает всю историю, а не один срез.
     ZONE_TS_WINDOW_WEEKS = 4  # согласовано с окном 3c (weekly_mpk_threshold_minutes), чтобы графики были сопоставимы
     zone_shares_ts = zone_share_time_series(intervals, zones, activities, window_weeks=ZONE_TS_WINDOW_WEEKS)
@@ -2013,16 +2506,16 @@ def main(db_path, out_path, json_path=None):
 
     # Раздел 4a/4b (ACWR по нагрузке Garmin и по объёму)
     acwr_load, acwr_km = compute_acwr(activities)
-    charts["5"] = plot_acwr(acwr_load, acwr_km)
+    charts["5"] = plot_acwr(acwr_load, acwr_km, xlim=WEEKLY_XLIM)
 
     # Раздел 8: темп по зонам, последние 4-8 недель (берём 8)
     WEEKS_BACK_PACE = 8
     recent_pace_df, cutoff_date = recent_pace_by_zone(intervals, zones, activities, weeks_back=WEEKS_BACK_PACE)
     tables["7"] = zones_table_with_recent_pace(zones, pano_final, recent_pace_df, WEEKS_BACK_PACE)
 
-    # Раздел 9 (вся история по кварталам, для сравнения с "актуальным" разделом 8)
+    # Раздел 6 (вся история по кварталам, для сравнения с "актуальным" разделом 3)
     pace_pivot_q, pace_grouped_q = pace_by_zone_quarterly(intervals, zones, activities)
-    charts["8"] = plot_pace_by_zone_quarterly(pace_pivot_q, zones)
+    charts["8"] = plot_pace_by_zone_quarterly(pace_pivot_q, zones, xlim=QUARTERLY_XLIM)
 
     # Раздел 5 (текст): оптимальный объём -> будущее изменение EF считается напрямую по БД,
     # calibration_profile.json не нужен
@@ -2054,35 +2547,117 @@ def main(db_path, out_path, json_path=None):
             'дорожка не корректируется — там нет физического "зима хуже лета" эффекта): пик формы '
             f'около {seasonal_info["peak_around"].strftime("%d.%m")}, спад около '
             f'{seasonal_info["trough_around"].strftime("%d.%m")}, амплитуда {seasonal_info["drop_pct"]}%. '
-            'Учтено в тренде EF (п.3a) и в поиске оптимального пульса (п.7).</div>'
+            'Учтено в тренде EF (п.4) и в поиске оптимального пульса (п.2).</div>'
         )
     else:
         html.append(
             f'<div class="note">Сезонная калибровка EF НЕ применена: {seasonal_info.get("reason", "")}.</div>'
         )
 
-    # 1
-    html.append('<div class="chart-block">')
-    html.append(img_tag(charts["1"]))
-    html.append("</div>")
+    # Порядок разделов (перегруппировано 2026-08-20): сначала пульсовые зоны (1-3, они нужны для
+    # всего остального), затем блок "Анализ прогресса" (4-6: EF/VDOT, VO2max, темп по зонам по
+    # кварталам), затем блок "Анализ объёмов" (7-12: объём, частота качественной работы, ACWR,
+    # марафонские отрезки, интерактивный факт/рекомендация, текстовые выводы по объёму).
 
-    # 2
+    # ---- Блок "Анализ пульса" (разделы 1-3) ----
+    html.append('<h1 style="margin-top:56px;">Анализ пульса</h1>')
+
+    # Раздел 1 (ПАНО, было 6)
     html.append('<div class="chart-block">')
-    html.append(img_tag(charts["2"]))
+    html.append("<h2>1. Пульс ПАНО по непрерывным эффортам ≥ ~35 минут</h2>")
+    min_hr_note = f"&ge;{int(round(pano_table_min_hr))}" if pano_table_min_hr is not None else "без ограничения снизу (нет данных для отступа от ПАНО)"
     html.append(
-        '<p class="meta">"Марафонские отрезки" — время лапов внутри длительных/лёгких тренировок '
-        f'с темпом {MARATHON_PACE_BAND_S_PER_KM[0]}-{MARATHON_PACE_BAND_S_PER_KM[1]} с/км '
-        '(фактический темп гонок Утрехт/Гронинген, с учётом калибровки дорожки); вычтено из доли '
-        'исходного типа тренировки (long/easy), чтобы сумма долей оставалась 100%.</p>'
+        f'<p class="meta">Отобраны тренировки длительностью 35-65 минут с устойчиво высоким пульсом '
+        f'({min_hr_note}, плато, не интервальная структура) — типичный диапазон 10К-гонок и жёстких '
+        'темповых тестов. Порог отступа считается от ПАНО (см. ниже), а не хардкодится.</p>'
     )
+    html.append(tables["3"].to_html(index=False, escape=False))
+    html.append(f"<p><b>Итоговая оценка ПАНО, используемая в отчёте: {pano_final} уд/мин.</b> {pano_source_note}</p>")
     html.append("</div>")
 
-    # Разделы 3a-3d, 4a-4b идут здесь, сразу после 2 — по смыслу это продолжение темы "объём и
-    # состав тренировок", начатой в 1 (объём) и 2 (доля типов/марафонских отрезков).
-    # Разделы 6, 7, 8, 9 (пульсовые зоны и темп по ним) идут дальше — это отдельная тема.
-
-    # Раздел 3a (график EF/VDOT)
+    # Раздел 2 (оптимальный пульс лёгкого бега, было 7) — общий заголовок, 2а/2б — два независимых метода
     html.append('<div class="chart-block">')
+    html.append("<h2>2. Оптимальный пульс лёгкого бега — две независимые проверки</h2>")
+    html.append(
+        '<p class="meta">2а — кросс-секционная проверка: при каком пульсе бег экономичнее ПРЯМО '
+        'СЕЙЧАС (в один момент времени). 2б ниже — продольная проверка: как пульс на лёгких связан '
+        'с изменением формы В БУДУЩЕМ. Обе диагностические — не используются напрямую для построения '
+        'зон в разделе 3 (там — методика Карвонена, см. её обоснование там же); это независимая '
+        'сверка, сходится ли она с результатом Карвонена.</p>'
+    )
+    html.append(img_tag(charts["6"]))
+    if peak_found:
+        html.append(
+            f'<p><b>Пульс, дающий максимальную эффективность на медленном беге: '
+            f"~{peak_center} уд/мин</b> (устойчиво по разным диапазонам фита: "
+            f"{[round(v) for v in peak_vertices]}).</p>"
+        )
+    else:
+        html.append(
+            '<div class="note">Выраженного пика эффективности НЕТ: EF практически не зависит от пульса '
+            'в рабочем диапазоне лёгкого бега (проверено на сезонно скорректированных данных; '
+            'вершина параболы либо отсутствует, либо гуляет более чем на 10 уд/мин между разными '
+            'диапазонами фита — смешивание recovery/aerobic пробежек и сезонность отдельно проверены '
+            'и не объясняют эту плоскую форму). Показана '
+            f'<b>медиана пульса лёгких пробежек ~{peak_center} уд/мин</b> — это описательная точка, '
+            'а не найденный оптимум (сравнение с зонами раздела 3 — там же).</div>'
+        )
+    html.append("</div>")
+
+    # Раздел 2б (продольная проверка: пульс на easy по времени под нагрузкой vs отклик формы)
+    if hr_resp_info is not None:
+        html.append('<div class="chart-block">')
+        html.append(img_tag(charts["6b"]))
+        corr_txt = f"{hr_resp_info['corr']:.2f}" if hr_resp_info["corr"] is not None else "н/д (мало точек)"
+        html.append(
+            '<p class="meta">Столбец = пульс на лёгких/восстановительных в этом квартале '
+            '(<b>% от ПАНО</b>, взвешено по времени под нагрузкой — БЕЗ учёта темпа). '
+            'Цвет столбца = что случилось с пороговым темпом Гармина в <b>следующем</b> квартале: '
+            'зелёный — форма выросла (порог стал быстрее), красный — стагнация/ухудшение, серый — '
+            'следующего квартала ещё нет в данных. Точные цифры — в таблице под графиком. Линейная '
+            f'корреляция по всей истории слабая (r={corr_txt}, n={hr_resp_info["n_quarters_valid"]} '
+            'кварталов) — слишком мало точек и слишком много посторонних факторов (объём, гонки, '
+            'тейпер), чтобы это было строгим доказательством причинности. Не используется напрямую '
+            'для построения зон (см. раздел 3) — только как один из двух независимых аргументов в '
+            'пользу того, где проходит граница Z1/Z2 (см. докстринг build_zones).</p>'
+        )
+        html.append(tables["6b"].to_html(index=False, escape=False))
+        html.append("</div>")
+
+    # Раздел 3 (пульсовые зоны и темп по ним, последние недели, было 8)
+    html.append('<div class="chart-block">')
+    html.append("<h2>3. Пульсовые зоны и актуальный темп (последние 8 недель)</h2>")
+    z2_lo, z2_hi = zones[1][1], zones[1][2]
+    ef_cross_check = (
+        f'Для сравнения: {"пик эффективности EF~HR" if peak_found else "медиана пульса из смешанной выборки recovery+лёгкие"} '
+        f'из раздела 2 составляет {easy_center} уд/мин — '
+        f'{"внутри" if z2_lo <= easy_center <= z2_hi else "вне"} границ Z2.'
+    )
+    html.append(
+        f'<p class="meta">Z1/Z2/Z3 построены по методике Карвонена (%HRR = резерв пульса = max_hr '
+        f'{"−"} rhr): Z2 = 60-70% HRR при rhr={rhr:.0f} уд/мин ({rhr_info["source"]}, '
+        f'{"скользящее среднее за " + str(rhr_info["window_days"]) + " дн." if rhr_info["source"]=="wellness.rhr" else "нет данных wellness"}) '
+        f'и max_hr={max_hr} уд/мин ({max_hr_info["source"]}'
+        + (f', отсеяно {max_hr_info["n_excluded"]} тренировок с неправдоподобным скачком max_hr '
+           f'относительно среднего пульса той же тренировки — см. estimate_max_hr()'
+           if max_hr_info.get("n_excluded") else '')
+        + '). Смена метода с прежнего "центр±6" на Карвонена и обоснование — '
+        f'см. докстринг build_zones() и диалог 2026-08-18: два независимых способа без ярлыков '
+        f'("Recovery"/"Easy") — форма распределения пульса и бэктест по методикам — сошлись на границе '
+        f'Z1/Z2 ≈60% HRR. {ef_cross_check} '
+        f'Верхняя граница Z4 = ПАНО ({pano_final} уд/мин). Темп — с учётом калибровки дорожки, '
+        f"только по тренировкам с {cutoff_date.strftime('%Y-%m-%d')} (последние 8 недель), "
+        f"диапазон = 25-75 перцентиль по сплитам, чтобы отражать актуальную форму, а не всю историю.</p>"
+    )
+    html.append(tables["7"].to_html(index=False, escape=False))
+    html.append("</div>")
+
+    # ---- Блок "Анализ прогресса" (было 3a, 3b, 9) ----
+    html.append('<h1 style="margin-top:56px;">Анализ прогресса</h1>')
+
+    # Раздел 4 (график EF/VDOT, было 3a)
+    html.append('<div class="chart-block">')
+    html.append("<h2>4. Тренд эффективности (EF) и VDOT по гонкам</h2>")
     html.append(img_tag(charts["4a"]))
     if len(tables["4a"]):
         html.append("<h3>Гонки, использованные для VDOT</h3>")
@@ -2119,20 +2694,44 @@ def main(db_path, out_path, json_path=None):
         html.append(tables["4a_excluded"].to_html(index=False, escape=False))
     html.append("</div>")
 
-    # Раздел 3b (VO2max-прокси)
+    # Раздел 5 (VO2max-прокси, было 3b)
     html.append('<div class="chart-block">')
+    html.append("<h2>5. VO2max-прокси по истории ПАНО Garmin</h2>")
     html.append(img_tag(charts["4b"]))
     html.append(
         '<p class="meta">В выгрузке БД нет прямого поля Garmin vo2max — ни в activities, ни в wellness. '
         'Единственный собственный фитнес-показатель Гармина в базе — история ПАНО (lactate_threshold, '
         'считается через Firstbeat по фактическим тренировкам). Эта кривая — VO2max-эквивалент, '
-        'посчитанный из истории ПАНО той же формулой Дэниэлса, что и VDOT в п.3a (эффорт ~60 мин) — '
+        'посчитанный из истории ПАНО той же формулой Дэниэлса, что и VDOT в п.4 (эффорт ~60 мин) — '
         'это оценка, а не собственно внутреннее число Гармина.</p>'
     )
     html.append("</div>")
 
-    # Раздел 3c (частота качественных тренировок / МПК-порог)
+    # Раздел 6 (темп по зонам по кварталам, вся история, было 9)
     html.append('<div class="chart-block">')
+    html.append("<h2>6. Темп по пульсовым зонам по кварталам (вся история)</h2>")
+    html.append(img_tag(charts["8"]))
+    html.append(
+        '<p class="meta">Темп по зонам показан ПО КВАРТАЛАМ, а не одним средним числом за всю историю — '
+        "за 2 года фитнес менялся (VDOT от ~31 до ~48, см. п.4), и единое среднее смешивало бы темп на "
+        "разных уровнях формы. Точка на графике = квартал, где в зоне набралось ≥8 сплитов (иначе пропуск, "
+        "не рисуется). Темп посчитан по лапам/сплитам (intervals), не по среднему за тренировку целиком — "
+        "исключает искажение от разминки/заминки. Сравни с разделом 3 (последние 8 недель, детальнее).</p>"
+    )
+    html.append("</div>")
+
+    # ---- Блок "Анализ объёмов" (было 1, 3c, 4a/4b, 2, 3d, 5) ----
+    html.append('<h1 style="margin-top:56px;">Анализ объёмов</h1>')
+
+    # Раздел 7 (объём по неделям, было 1)
+    html.append('<div class="chart-block">')
+    html.append("<h2>7. Объём бега по неделям</h2>")
+    html.append(img_tag(charts["1"]))
+    html.append("</div>")
+
+    # Раздел 8 (частота качественных тренировок / МПК-порог, было 3c)
+    html.append('<div class="chart-block">')
+    html.append("<h2>8. Частота качественных тренировок и минуты МПК/порог</h2>")
     html.append(img_tag(charts["4c"]))
     html.append(
         '<p class="meta">Фиолетовые столбики — в скольких тренировках за неделю обнаружены "рабочие" '
@@ -2142,7 +2741,7 @@ def main(db_path, out_path, json_path=None):
         'работы (длинные непрерывные усилия, 6-30 мин) за неделю, тоже скользящее среднее за 4 недели '
         '— важен именно СОСТАВ качественной работы, а не только её наличие. Обе ищутся во ВСЕХ '
         'тренировках с пульсом, а не только в размеченных как interval/threshold — иначе теряются '
-        'пикапы/вставки марафонского темпа внутри длительных и лёгких (см. п.1 про недельный объём). '
+        'пикапы/вставки марафонского темпа внутри длительных и лёгких (см. п.7 про недельный объём). '
         'Видно не просто падение объёма, а смену состава: '
         'в здоровые периоды роста VDOT (напр. июнь-август 2025) качественная работа почти вся МПК '
         '(96-100% от суммы МПК+порог), а с января по апрель 2026 пропорция резко переворачивается — '
@@ -2153,24 +2752,9 @@ def main(db_path, out_path, json_path=None):
     )
     html.append("</div>")
 
-    # Раздел 3d: интерактивный график факт (в динамике) vs рекомендовано (выбор дистанции)
+    # Раздел 9 (ACWR, было 4a/4b)
     html.append('<div class="chart-block">')
-    html.append("<h3>3d. Факт vs рекомендовано по зонам, в динамике — выбор целевой дистанции</h3>")
-    html.append(
-        '<p class="meta">Факт показан ПО ВРЕМЕНИ (скользящее окно '
-        f'{ZONE_TS_WINDOW_WEEKS} недель на каждую неделю истории, то же окно, что и в 3c), а '
-        'рекомендуемая доля для выбранной дистанции — горизонтальными пунктирными линиями того же '
-        'цвета, что и соответствующая зона, для сравнения на глаз в любой момент истории, а не '
-        'только "сейчас". С 2026-08-17 числитель факта — только обнаруженные рабочие отрезки '
-        '(та же детекция, что в 3c), а не любая лапа с этим пульсом: раньше лёгкие/длинные '
-        'пробежки, где пульс случайно заходил в ту же зону (жара, дрейф, рельеф), маскировали на '
-        'этом графике спад качественной работы, видимый на 3c.</p>'
-    )
-    html.append(zone_time_html)
-    html.append("</div>")
-
-    # Раздел 4a/4b (ACWR)
-    html.append('<div class="chart-block">')
+    html.append("<h2>9. ACWR — острая/хроническая нагрузка</h2>")
     html.append(img_tag(charts["5"]))
     html.append(
         '<p class="meta">Способ 1: ACWR по тренировочной нагрузке Garmin (activity_training_load). '
@@ -2179,67 +2763,43 @@ def main(db_path, out_path, json_path=None):
     )
     html.append("</div>")
 
-    # Раздел 5 (текст: оптимальный объём и структура)
+    # Раздел 10 (доля марафонских отрезков по неделям, было 2)
+    html.append('<div class="chart-block">')
+    html.append("<h2>10. Доли типов тренировок по неделям</h2>")
+    html.append(img_tag(charts["2"]))
+    html.append(
+        '<p class="meta">"Марафонские отрезки" — время лапов внутри длительных/лёгких тренировок '
+        'с пульсом в зоне Z3 "марафонский темп" (см. раздел 3, методика Карвонена); вычтено из доли '
+        'исходного типа тренировки (long/easy), чтобы сумма долей оставалась 100%. Раньше отбор шёл '
+        'по фиксированному темповому коридору (285-335 с/км, по фактическому темпу гонок Утрехт/'
+        'Гронинген) — статичный коридор систематически не ловил такие тренировки из периодов с '
+        'другой формой (см. диалог 2026-08-20, тренировка от 2026-02-15: 191 мин с устойчивым '
+        'пульсом в Z3 весь забег, но темпом 346-420 с/км — вне тогдашнего коридора). Пульсовая зона '
+        'Z3, в отличие от темпового коридора, сама уже подстроена под этого атлета и не завязана на '
+        'конкретный темп — поэтому одинаково применима к любому периоду истории. Темповые/'
+        'интервальные вставки (не марафонские) по-прежнему определяются по темповым коридорам.</p>'
+    )
+    html.append("</div>")
+
+    # Раздел 11: интерактивный график факт (в динамике) vs рекомендовано (выбор дистанции, было 3d)
+    html.append('<div class="chart-block">')
+    html.append("<h2>11. Факт vs рекомендовано по зонам, в динамике — выбор целевой дистанции</h2>")
+    html.append(
+        '<p class="meta">Факт показан ПО ВРЕМЕНИ (скользящее окно '
+        f'{ZONE_TS_WINDOW_WEEKS} недель на каждую неделю истории, то же окно, что и в разделе 8), а '
+        'рекомендуемая доля для выбранной дистанции — горизонтальными пунктирными линиями того же '
+        'цвета, что и соответствующая зона, для сравнения на глаз в любой момент истории, а не '
+        'только "сейчас". С 2026-08-17 числитель факта — только обнаруженные рабочие отрезки '
+        '(та же детекция, что в разделе 8), а не любая лапа с этим пульсом: раньше лёгкие/длинные '
+        'пробежки, где пульс случайно заходил в ту же зону (жара, дрейф, рельеф), маскировали на '
+        'этом графике спад качественной работы, видимый в разделе 8.</p>'
+    )
+    html.append(zone_time_html)
+    html.append("</div>")
+
+    # Раздел 12 (текст: оптимальный объём и структура, было 5)
     html.append('<div class="chart-block">')
     html.append(text9)
-    html.append("</div>")
-
-    # Раздел 6 (ПАНО)
-    html.append('<div class="chart-block">')
-    html.append("<h2>6. Пульс ПАНО по непрерывным эффортам ≥ ~35 минут</h2>")
-    min_hr_note = f"&ge;{int(round(pano_table_min_hr))}" if pano_table_min_hr is not None else "без ограничения снизу (нет данных для отступа от ПАНО)"
-    html.append(
-        f'<p class="meta">Отобраны тренировки длительностью 35-65 минут с устойчиво высоким пульсом '
-        f'({min_hr_note}, плато, не интервальная структура) — типичный диапазон 10К-гонок и жёстких '
-        'темповых тестов. Порог отступа считается от ПАНО (см. ниже), а не хардкодится.</p>'
-    )
-    html.append(tables["3"].to_html(index=False, escape=False))
-    html.append(f"<p><b>Итоговая оценка ПАНО, используемая в отчёте: {pano_final} уд/мин.</b> {pano_source_note}</p>")
-    html.append("</div>")
-
-    # Раздел 7 (оптимальный пульс лёгкого бега; номер "7." — в заголовке самого графика)
-    html.append('<div class="chart-block">')
-    html.append(img_tag(charts["6"]))
-    if peak_found:
-        html.append(
-            f'<p><b>Пульс, дающий максимальную эффективность на медленном беге: '
-            f"~{peak_center} уд/мин</b> (использован как центр зоны 2 в разделе 8; "
-            f"устойчиво по разным диапазонам фита: {[round(v) for v in peak_vertices]}).</p>"
-        )
-    else:
-        html.append(
-            '<div class="note">Выраженного пика эффективности НЕТ: EF практически не зависит от пульса '
-            'в рабочем диапазоне лёгкого бега (проверено на сезонно скорректированных данных; '
-            'вершина параболы либо отсутствует, либо гуляет более чем на 10 уд/мин между разными '
-            'диапазонами фита — смешивание recovery/aerobic пробежек и сезонность отдельно проверены '
-            'и не объясняют эту плоскую форму). В качестве прагматичного центра Z2 используется '
-            f'<b>медиана пульса лёгких пробежек ~{peak_center} уд/мин</b> — это описательная точка, '
-            'а не найденный оптимум.</div>'
-        )
-    html.append("</div>")
-
-    # Раздел 8 (пульсовые зоны и темп по ним, последние недели)
-    html.append('<div class="chart-block">')
-    html.append("<h2>8. Пульсовые зоны и актуальный темп (последние 8 недель)</h2>")
-    html.append(
-        f'<p class="meta">Z2 центрирована на {easy_center} уд/мин (пик эффективности из раздела 7), '
-        f"верхняя граница Z4 = ПАНО ({pano_final} уд/мин). Темп — с учётом калибровки дорожки, "
-        f"только по тренировкам с {cutoff_date.strftime('%Y-%m-%d')} (последние 8 недель), "
-        f"диапазон = 25-75 перцентиль по сплитам, чтобы отражать актуальную форму, а не всю историю.</p>"
-    )
-    html.append(tables["7"].to_html(index=False, escape=False))
-    html.append("</div>")
-
-    # Раздел 9 (темп по зонам по кварталам, вся история; номер "9." — в заголовке графика)
-    html.append('<div class="chart-block">')
-    html.append(img_tag(charts["8"]))
-    html.append(
-        '<p class="meta">Темп по зонам показан ПО КВАРТАЛАМ, а не одним средним числом за всю историю — '
-        "за 2 года фитнес менялся (VDOT от ~31 до ~48, см. п.3a), и единое среднее смешивало бы темп на "
-        "разных уровнях формы. Точка на графике = квартал, где в зоне набралось ≥8 сплитов (иначе пропуск, "
-        "не рисуется). Темп посчитан по лапам/сплитам (intervals), не по среднему за тренировку целиком — "
-        "исключает искажение от разминки/заминки. Сравни с разделом 8 (последние 8 недель, детальнее).</p>"
-    )
     html.append("</div>")
 
     html.append(HTML_TAIL)

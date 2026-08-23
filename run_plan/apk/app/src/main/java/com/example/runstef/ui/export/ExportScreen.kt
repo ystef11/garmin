@@ -10,30 +10,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.clickable
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -44,14 +36,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.runstef.data.PlanRepository
 import com.example.runstef.data.SavedPlan
+import com.example.runstef.ui.common.GarminAccountSelector
 import kotlinx.coroutines.launch
 
 private val CROSS_TYPES = listOf(
@@ -86,7 +77,6 @@ fun ExportScreen(preselectedFilePath: String? = null) {
 
     val logLines by vm.log.collectAsState()
     val isRunning by vm.isRunning.collectAsState()
-    val mfaRequested by vm.mfaRequested.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Экспорт плана", style = MaterialTheme.typography.headlineSmall)
@@ -111,12 +101,11 @@ fun ExportScreen(preselectedFilePath: String? = null) {
             val plan = selectedPlan?.plan
             if (tabIndex == 0) {
                 GarminTab(
-                    savedAccounts = vm.savedGarminAccounts(),
-                    hasSavedToken = { acc -> vm.hasSavedGarminToken(acc) },
+                    initialAccounts = vm.savedGarminAccounts(),
                     enabled = !isRunning && plan != null,
-                    onSubmit = { account, password, testFirstWeek, clearAll, clearPast, before ->
+                    onSubmit = { account, testFirstWeek, clearAll, clearPast, before, allDates ->
                         plan?.let {
-                            vm.exportToGarmin(it, account, password, skipCross.value, dryRun, testFirstWeek, clearAll, clearPast, before)
+                            vm.exportToGarmin(it, account, skipCross.value, dryRun, testFirstWeek, clearAll, clearPast, before, allDates)
                         }
                     }
                 )
@@ -137,23 +126,6 @@ fun ExportScreen(preselectedFilePath: String? = null) {
                 items(logLines) { line -> Text(line, style = MaterialTheme.typography.bodySmall) }
             }
         }
-    }
-
-    if (mfaRequested) {
-        var code by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { vm.cancelMfa() },
-            title = { Text("Код 2FA Garmin") },
-            text = {
-                OutlinedTextField(
-                    value = code, onValueChange = { code = it },
-                    label = { Text("Код из приложения/SMS") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                )
-            },
-            confirmButton = { TextButton(onClick = { vm.submitMfaCode(code) }) { Text("Подтвердить") } },
-            dismissButton = { TextButton(onClick = { vm.cancelMfa() }) { Text("Отмена") } }
-        )
     }
 }
 
@@ -207,84 +179,46 @@ private fun CrossTypeChips(selected: Set<String>, onChange: (Set<String>) -> Uni
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GarminTab(
-    savedAccounts: List<String>,
-    hasSavedToken: (String) -> Boolean,
+    initialAccounts: List<String>,
     enabled: Boolean,
-    onSubmit: (account: String, password: String, testFirstWeek: Boolean, clearAll: Boolean, clearPast: Boolean, before: java.time.LocalDate?) -> Unit
+    onSubmit: (account: String, testFirstWeek: Boolean, clearAll: Boolean, clearPast: Boolean, before: java.time.LocalDate?, allDates: Boolean) -> Unit
 ) {
+    var savedAccounts by remember { mutableStateOf(initialAccounts) }
     var account by remember { mutableStateOf(savedAccounts.firstOrNull() ?: "") }
-    var password by remember { mutableStateOf("") }
-    // Пока true — в поле пароля вместо реального значения показывается декоративная маска
-    // "••••••••", сигнализирующая, что для аккаунта уже есть сохранённый вход. Сбрасывается,
-    // как только пользователь реально заходит в поле, — тогда оно становится обычным пустым
-    // полем ввода нового пароля.
-    var passwordRevealed by remember { mutableStateOf(false) }
-    var accountMenuExpanded by remember { mutableStateOf(false) }
     var testFirstWeek by remember { mutableStateOf(false) }
+    var allDates by remember { mutableStateOf(false) }
     var clearAll by remember { mutableStateOf(false) }
     var clearPast by remember { mutableStateOf(false) }
     var beforeDate by remember { mutableStateOf("") }
 
-    val accountHasSavedToken = hasSavedToken(account)
-    val showSavedPasswordMask = accountHasSavedToken && !passwordRevealed
-
     Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        ExposedDropdownMenuBox(
-            expanded = accountMenuExpanded && savedAccounts.isNotEmpty(),
-            onExpandedChange = { if (savedAccounts.isNotEmpty()) accountMenuExpanded = it }
-        ) {
-            OutlinedTextField(
-                value = account,
-                onValueChange = { account = it; password = ""; passwordRevealed = false },
-                label = { Text("Аккаунт Garmin (email)") },
-                trailingIcon = {
-                    if (savedAccounts.isNotEmpty()) {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = accountMenuExpanded)
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)
-            )
-            DropdownMenu(
-                expanded = accountMenuExpanded && savedAccounts.isNotEmpty(),
-                onDismissRequest = { accountMenuExpanded = false }
-            ) {
-                savedAccounts.forEach { acc ->
-                    DropdownMenuItem(
-                        text = { Text(acc) },
-                        onClick = { account = acc; password = ""; passwordRevealed = false; accountMenuExpanded = false }
-                    )
-                }
+        GarminAccountSelector(
+            savedAccounts = savedAccounts,
+            account = account,
+            onAccountSelected = { account = it },
+            onAccountAdded = { newAccount ->
+                if (newAccount !in savedAccounts) savedAccounts = savedAccounts + newAccount
+                account = newAccount
             }
-        }
-        OutlinedTextField(
-            value = if (showSavedPasswordMask) "••••••••" else password,
-            onValueChange = { password = it },
-            label = { Text("Пароль") },
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp)
-                .onFocusChanged { state -> if (state.isFocused && showSavedPasswordMask) passwordRevealed = true }
         )
-        Text(
-            when {
-                showSavedPasswordMask -> "Сохранён вход для этого аккаунта — можно отправлять без ввода пароля."
-                accountHasSavedToken -> "Пароль изменён — при отправке выполню повторный вход и обновлю сохранённый токен."
-                else -> "Нужен для первого входа в этот аккаунт."
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
             Checkbox(checked = testFirstWeek, onCheckedChange = { testFirstWeek = it })
             Text("Только первая неделя")
         }
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Checkbox(checked = allDates, onCheckedChange = { allDates = it })
+            Text("Весь план целиком (включая прошедшие даты)")
+        }
+        Text(
+            "По умолчанию отправляются только тренировки с датой не раньше сегодняшней; уже " +
+                "загруженные тренировки с такими же именами перед отправкой удаляются автоматически " +
+                "(без дублей).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
             Checkbox(checked = clearAll, onCheckedChange = { clearAll = it; if (it) clearPast = false })
             Text("Удалить все тренировки плана перед загрузкой")
         }
@@ -303,7 +237,7 @@ private fun GarminTab(
             enabled = enabled && account.isNotBlank(),
             onClick = {
                 val before = beforeDate.takeIf { it.isNotBlank() }?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
-                onSubmit(account.trim(), password, testFirstWeek, clearAll, clearPast, before)
+                onSubmit(account.trim(), testFirstWeek, clearAll, clearPast, before, allDates)
             },
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
         ) { Text("Отправить в Garmin Connect") }

@@ -191,15 +191,33 @@ class GarminApi(
         testFirstWeek: Boolean,
         clearAll: Boolean,
         clearPast: Boolean,
-        clearBefore: LocalDate?
+        clearBefore: LocalDate?,
+        allDates: Boolean = false,
+        noClearExisting: Boolean = false
     ): Result {
         val tag = plan.meta.tag
         val allItems = buildItems(plan, skipCross)
         if (allItems.isEmpty()) throw RuntimeException("В плане нет тренировок для загрузки.")
+
+        // По умолчанию (allDates=false) создаём только тренировки с датой >= сегодня —
+        // прошедшие пропускаем (как в десктопном plan_export_garmin.py). Не относится к
+        // clearAll/clearPast — их всегда выполняем по всему плану (allItems).
         var items = allItems
+        if (!(clearAll || clearPast) && !allDates) {
+            val today = LocalDate.now()
+            val skippedPast = items.count { it.date < today }
+            items = items.filter { it.date >= today }
+            if (skippedPast > 0) {
+                log("Пропущено прошедших тренировок (дата < $today): $skippedPast (включи «Весь план целиком», чтобы загрузить всё)")
+            }
+            if (items.isEmpty()) {
+                throw RuntimeException("После фильтра по дате (>= $today) в плане не осталось тренировок. Включи «Весь план целиком».")
+            }
+        }
+
         if (testFirstWeek) {
-            val end = allItems.first().date.plusDays(7)
-            items = allItems.filter { it.date < end }
+            val end = items.first().date.plusDays(7)
+            items = items.filter { it.date < end }
         }
 
         if (dryRun) {
@@ -239,6 +257,36 @@ class GarminApi(
             }
             log("Удалено ранее загруженных тренировок этого плана: $removed")
             return Result(cleared = removed)
+        }
+
+        // По умолчанию (noClearExisting=false) перед созданием чистим в Garmin уже
+        // существующие тренировки с ТАКИМИ ЖЕ именами, что и сейчас загружаемые — защита
+        // от дублей при повторном запуске/перезаливке (как в десктопном скрипте).
+        if (!noClearExisting) {
+            try {
+                val namesToUpload = items.map { it.name }.toSet()
+                val existingResp = auth.connectApi(tokens, "/workout-service/workouts?start=0&limit=999")
+                val existingText = existingResp.body?.string() ?: "[]"
+                existingResp.close()
+                val existing = runCatching { Json.parseToJsonElement(existingText).jsonArray }.getOrNull()
+                val dupes = existing?.filter { (it.jsonObject["workoutName"]?.jsonPrimitive?.content ?: "") in namesToUpload } ?: emptyList()
+                if (dupes.isNotEmpty()) {
+                    log("Удаляю ${dupes.size} уже существующих тренировок с такими же именами (чтобы не плодить дубли)…")
+                    var removedDupes = 0
+                    for (obj in dupes) {
+                        val id = obj.jsonObject["workoutId"]?.jsonPrimitive?.content ?: continue
+                        try {
+                            auth.connectApi(tokens, "/workout-service/workout/$id", "DELETE").close()
+                            removedDupes++
+                        } catch (e: Exception) {
+                            log("  FAIL удаления дубля workoutId=$id -> ${e.message}")
+                        }
+                    }
+                    log("Удалено дублей: $removedDupes")
+                }
+            } catch (e: Exception) {
+                log("Не удалось проверить существующие тренировки перед загрузкой (${e.message}) — продолжаю без автоочистки.")
+            }
         }
 
         var ok = 0

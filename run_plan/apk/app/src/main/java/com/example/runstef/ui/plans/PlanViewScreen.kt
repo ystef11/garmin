@@ -25,6 +25,7 @@ import com.example.runstef.data.PlanRepository
 import com.example.runstef.network.INSTALL_ANDROID_PRINT_JS
 import com.example.runstef.network.WebPrintBridge
 import com.example.runstef.network.WebViewDownloads
+import com.example.runstef.network.enableZoom
 import java.io.File
 
 /**
@@ -41,6 +42,7 @@ import java.io.File
  * Вместо этого грузим через content://-URI уже настроенного FileProvider (тот же, что используется для
  * шаринга плана, см. PlanRepository.getShareUri / res/xml/file_paths.xml) — он резолвится через
  * ContentResolver в процессе самого приложения, без сети и без прямого доступа рендерера к диску.
+ * Тот же приём — в ui/analytics/AnalyticsReportScreen (отчёт аналитики).
  *
  * setDownloadListener — без него клик по кнопкам «Скачать plan.json для Garmin»/«Скачать HTML
  * плана» внутри просматриваемого плана ничего не делал: WebView без обработчика скачивания
@@ -52,7 +54,7 @@ import java.io.File
  * не реализует window.print(), а без явного webViewClient здесь не было и подмены window.print
  * на вызов моста, как это сделано в ToolWebViewScreen (там подмена шла через OfflineCacheWebViewClient.
  * onPageFinished, который для просмотра локального плана не используется). Мост WebPrintBridge и
- * сам JS — общие с ToolWebViewScreen, см. network/WebViewDownloads.
+ * сам JS — общие с ToolWebViewScreen, см. network/WebViewDownloads. Пинч-зум — см. network/WebViewZoom.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -75,6 +77,7 @@ fun PlanViewScreen(filePath: String) {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.allowContentAccess = true
+                enableZoom()
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, url: String?) {
                         super.onPageFinished(view, url)

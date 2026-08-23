@@ -64,6 +64,27 @@ private val HARDCODED_FALLBACK = BundledConfig(
                 description = "Соотношение зон пульса к диапазонам темпа",
                 icon = "zones",
                 url = "https://ystef11.github.io/run/hr_pace_calculator.html"
+            ),
+            HomeItem(
+                id = "rank",
+                title = "Калькулятор разряда по бегу",
+                description = "Оценка VDOT и прогноз разряда по ЕВСК",
+                icon = "rank",
+                url = "https://ystef11.github.io/run/rank_calculator.html"
+            ),
+            HomeItem(
+                id = "laps",
+                title = "Калькулятор отсечек дистанции",
+                description = "Промежуточные отметки, время и темп по дистанции",
+                icon = "laps",
+                url = "https://ystef11.github.io/run/laps_calculator.html"
+            ),
+            HomeItem(
+                id = "weight",
+                title = "Калькулятор веса и ИМТ",
+                description = "ИМТ и влияние состава изменения веса на темп бега",
+                icon = "weight",
+                url = "https://ystef11.github.io/run/weight_calculator.html"
             )
         )
     )

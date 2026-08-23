@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -28,8 +29,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -41,6 +48,9 @@ import androidx.navigation.navArgument
 import androidx.navigation.NavType
 import com.example.runstef.data.PlanRepository
 import com.example.runstef.data.VersionCompare
+import com.example.runstef.network.garmin.GarminTokenStore
+import com.example.runstef.ui.analytics.AnalyticsReportScreen
+import com.example.runstef.ui.analytics.AnalyticsScreen
 import com.example.runstef.ui.auth.AuthViewModel
 import com.example.runstef.ui.auth.LockScreen
 import com.example.runstef.ui.export.ExportScreen
@@ -58,16 +68,20 @@ private sealed class Dest(val route: String, val label: String) {
     data object Home : Dest("home", "Главная")
     data object Plans : Dest("plans", "Мои планы")
     data object Export : Dest("export", "Экспорт")
+    data object Analytics : Dest("analytics", "Аналитика")
 }
 
-private val bottomDestinations = listOf(Dest.Home, Dest.Plans, Dest.Export)
+private val bottomDestinations = listOf(Dest.Home, Dest.Plans, Dest.Export, Dest.Analytics)
 
 /**
  * Наследуется от FragmentActivity (а не ComponentActivity), т.к. androidx.biometric.BiometricPrompt
  * требует FragmentActivity/Fragment для показа системного диалога биометрии — см. ui/auth/LockScreen.
  *
- * ПИН/биометрия защищают только вкладку «Экспорт» (там лежат токены Garmin/intervals.icu) —
- * остальное приложение (калькуляторы, мои планы) доступно без разблокировки.
+ * ПИН/биометрия закрывают ВСЁ приложение целиком (а не только вкладку «Экспорт»), но только если
+ * есть хотя бы один сохранённый аккаунт Garmin (см. GarminTokenStore.savedAccounts) — там лежат
+ * токены Garmin/intervals.icu, и именно их наличие включает защиту. Если аккаунтов ещё нет —
+ * приложение открывается сразу, без ПИН-экрана. Разблокировка сбрасывается при уходе приложения
+ * в фон (ON_STOP) — см. RunstefApp.
  */
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -108,13 +122,46 @@ private fun RunstefApp(
     homeViewModel: HomeViewModel,
     startDestination: String
 ) {
+    val context = LocalContext.current
+    val unlocked by authViewModel.unlocked.collectAsState()
+
+    // Защита всего приложения включается, только если есть хотя бы один сохранённый аккаунт
+    // Garmin — пересчитываем при каждом возврате приложения на передний план (ON_START), т.к.
+    // аккаунт мог появиться/исчезнуть, пока приложение было свёрнуто (а также сразу после
+    // добавления первого аккаунта через «＋» на вкладках «Экспорт»/«Аналитика»).
+    var hasSavedAccounts by remember {
+        mutableStateOf(GarminTokenStore(context).savedAccounts().isNotEmpty())
+    }
+
+    DisposableEffect(activity) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    hasSavedAccounts = GarminTokenStore(context).savedAccounts().isNotEmpty()
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    // Приложение свёрнуто/ушло в фон — при возврате снова нужен ПИН/биометрия.
+                    authViewModel.lockNow()
+                }
+                else -> {}
+            }
+        }
+        activity.lifecycle.addObserver(observer)
+        onDispose { activity.lifecycle.removeObserver(observer) }
+    }
+
+    if (hasSavedAccounts && !unlocked) {
+        LockScreen(activity = activity, authViewModel = authViewModel)
+        return
+    }
+
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination
-    // На WebView-экранах (калькуляторы, просмотр плана) верхний тулбар скрываем,
+    // На WebView-экранах (калькуляторы, просмотр плана, отчёт аналитики) верхний тулбар скрываем,
     // чтобы оставить только нижнюю навигацию и сэкономить место на экране.
     val hideTopBar = currentRoute?.hierarchy?.any {
-        it.route == "tool/{url}" || it.route == "planview?path={path}"
+        it.route == "tool/{url}" || it.route == "planview?path={path}" || it.route == "analyticsReport?path={path}"
     } == true
 
     Scaffold(
@@ -159,6 +206,7 @@ private fun RunstefApp(
                                 Dest.Home -> Icon(Icons.Filled.Home, contentDescription = dest.label)
                                 Dest.Plans -> Icon(Icons.AutoMirrored.Filled.List, contentDescription = dest.label)
                                 Dest.Export -> Icon(Icons.Filled.UploadFile, contentDescription = dest.label)
+                                Dest.Analytics -> Icon(Icons.Filled.Insights, contentDescription = dest.label)
                             }
                         },
                         label = { Text(dest.label) }
@@ -219,17 +267,22 @@ private fun RunstefApp(
                 arguments = listOf(navArgument("plan") { type = NavType.StringType; nullable = true; defaultValue = null })
             ) { entry ->
                 val plan = entry.arguments?.getString("plan")
-                val unlocked by authViewModel.unlocked.collectAsState()
-                // Разблокировка сбрасывается при выходе с вкладки — при следующем открытии «Экспорта»
-                // снова нужно ввести ПИН/биометрию.
-                DisposableEffect(Unit) {
-                    onDispose { authViewModel.lockNow() }
-                }
-                if (unlocked) {
-                    ExportScreen(preselectedFilePath = plan)
-                } else {
-                    LockScreen(activity = activity, authViewModel = authViewModel)
-                }
+                // ПИН/биометрия теперь защищают всё приложение целиком (см. проверку
+                // hasSavedAccounts && !unlocked выше) — здесь отдельного гейта больше не нужно,
+                // экран «Экспорт» открывается сразу.
+                ExportScreen(preselectedFilePath = plan)
+            }
+            composable(Dest.Analytics.route) {
+                AnalyticsScreen(onOpenReport = { path ->
+                    navController.navigate("analyticsReport?path=${Uri.encode(path)}")
+                })
+            }
+            composable(
+                route = "analyticsReport?path={path}",
+                arguments = listOf(navArgument("path") { type = NavType.StringType })
+            ) { entry ->
+                val path = Uri.decode(entry.arguments?.getString("path") ?: "")
+                AnalyticsReportScreen(filePath = path)
             }
             composable("security") {
                 SecurityScreen(

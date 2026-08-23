@@ -8,10 +8,13 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.MilitaryTech
 import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.MonitorWeight
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Terrain
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.WbSunny
@@ -41,12 +44,16 @@ data class CalculatorTool(
  * здесь он маппится на существующие Icons.*. Неизвестный ключ (например, конфиг с бэка выслал
  * иконку новее, чем умеет текущая версия приложения) — нейтральная заглушка, чтобы не крашиться.
  *
- * Ключи "run"/"bolt"/"speed"/"heart" — уже используемые инструменты (план/гели/темп/VO2max).
- * Ключи ниже ("zones", "route", "timer", "trophy", "nutrition", "terrain", "calendar",
- * "recovery", "weather") — задел на будущие инструменты сайта run/\*.html: сервер сможет
- * указать один из них в поле "icon" конфига без правки кода приложения. Подбирайте ключ по
- * смыслу нового инструмента; если подходящего нет — сначала добавьте новую пару icon-key →
- * ImageVector сюда, а уже потом ссылайтесь на неё из конфига.
+ * Ключи "run"/"bolt"/"speed"/"heart"/"zones"/"rank"/"laps"/"weight" — уже используемые
+ * инструменты (план/гели/темп/VO2max/пульсовые зоны/разряд/отсечки/вес-ИМТ) — см.
+ * https://ystef11.github.io/run/android/config.json, откуда фактически приходит состав
+ * «Главной» (assets/app_config.json — лишь встроенный fallback на случай отсутствия сети,
+ * держите оба списка синхронными при добавлении нового инструмента).
+ * Ключи ниже ("route", "timer", "trophy", "nutrition", "terrain", "calendar", "recovery",
+ * "weather") — задел на будущие инструменты сайта run/\*.html: сервер сможет указать один из
+ * них в поле "icon" конфига без правки кода приложения. Подбирайте ключ по смыслу нового
+ * инструмента; если подходящего нет — сначала добавьте новую пару icon-key → ImageVector сюда,
+ * а уже потом ссылайтесь на неё из конфига.
 */
 
 fun iconForKey(key: String): ImageVector = when (key) {
@@ -54,8 +61,11 @@ fun iconForKey(key: String): ImageVector = when (key) {
     "bolt" -> Icons.Filled.Bolt
     "speed" -> Icons.Filled.Speed
     "heart" -> Icons.Filled.MonitorHeart
-    // Задел на будущее — новые типы инструментов сайта:
     "zones" -> Icons.Filled.Favorite // темп/усилие по пульсовым зонам (hr_pace)
+    "rank" -> Icons.Filled.MilitaryTech // разряд по бегу (rank_calculator, VDOT/ЕВСК)
+    "laps" -> Icons.Filled.Straighten // отсечки дистанции (laps_calculator)
+    "weight" -> Icons.Filled.MonitorWeight // вес и ИМТ (weight_calculator)
+    // Задел на будущее — новые типы инструментов сайта:
     "route" -> Icons.Filled.Route // маршрут/дистанция забега
     "timer" -> Icons.Filled.Timer // интервальные тренировки
     "trophy" -> Icons.Filled.EmojiEvents // цель на старте, прогноз результата забега

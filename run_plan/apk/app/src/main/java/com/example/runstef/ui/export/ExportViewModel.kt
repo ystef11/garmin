@@ -10,7 +10,6 @@ import com.example.runstef.network.IntervalsApi
 import com.example.runstef.network.garmin.GarminApi
 import com.example.runstef.network.garmin.GarminAuth
 import com.example.runstef.network.garmin.GarminTokenStore
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,10 +30,6 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
     private val _isRunning = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
 
-    private val _mfaRequested = MutableStateFlow(false)
-    val mfaRequested: StateFlow<Boolean> = _mfaRequested.asStateFlow()
-    private var mfaDeferred: CompletableDeferred<String>? = null
-
     fun savedGarminAccounts(): List<String> = garminTokenStore.savedAccounts()
 
     fun hasSavedGarminToken(account: String): Boolean =
@@ -46,16 +41,6 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearLog() {
         _log.value = emptyList()
-    }
-
-    fun submitMfaCode(code: String) {
-        mfaDeferred?.complete(code)
-        _mfaRequested.value = false
-    }
-
-    fun cancelMfa() {
-        mfaDeferred?.completeExceptionally(RuntimeException("Ввод кода 2FA отменён"))
-        _mfaRequested.value = false
     }
 
     suspend fun loadIntervalsCreds(): Pair<String, String> =
@@ -90,13 +75,13 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
     fun exportToGarmin(
         plan: RunPlan,
         account: String,
-        password: String,
         skipCross: Set<String>,
         dryRun: Boolean,
         testFirstWeek: Boolean,
         clearAll: Boolean,
         clearPast: Boolean,
-        clearBefore: LocalDate?
+        clearBefore: LocalDate?,
+        allDates: Boolean = false
     ) {
         if (_isRunning.value) return
         _isRunning.value = true
@@ -104,41 +89,27 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             try {
                 val auth = GarminAuth(log = ::appendLog)
+                // Вход по паролю теперь делается только во всплывающем окне добавления
+                // аккаунта (AddGarminAccountDialog) — здесь только загрузка/обновление
+                // уже сохранённого токена.
                 var tokens = garminTokenStore.load(account)
-                if (password.isNotBlank()) {
-                    // Пользователь вручную ввёл/изменил пароль — это явный запрос на
-                    // переавторизацию, даже если для аккаунта уже есть валидный токен.
-                    appendLog("Вход в Garmin Connect ($account)…")
-                    tokens = withContext(Dispatchers.IO) {
-                        auth.login(account, password, mfaPrompt = GarminAuth.MfaPrompt {
-                            _mfaRequested.value = true
-                            val deferred = CompletableDeferred<String>()
-                            mfaDeferred = deferred
-                            deferred.await()
-                        })
+                if (tokens != null && auth.isExpired(tokens)) {
+                    appendLog("Токен истёк, обновляю…")
+                    tokens = try {
+                        withContext(Dispatchers.IO) { auth.refresh(tokens!!) }
+                    } catch (e: Exception) {
+                        appendLog("Не удалось обновить токен (${e.message}), нужен повторный вход.")
+                        null
                     }
-                    garminTokenStore.save(account, tokens)
-                    settings.saveLastGarminAccount(account)
-                    appendLog("Токен сохранён для $account")
-                } else {
-                    if (tokens != null && auth.isExpired(tokens)) {
-                        appendLog("Токен истёк, обновляю…")
-                        tokens = try {
-                            withContext(Dispatchers.IO) { auth.refresh(tokens!!) }
-                        } catch (e: Exception) {
-                            appendLog("Не удалось обновить токен (${e.message}), нужен повторный вход.")
-                            null
-                        }
-                        tokens?.let { garminTokenStore.save(account, it) }
-                    }
-                    if (tokens == null) {
-                        throw RuntimeException("Нужен пароль для входа в аккаунт $account: сохранённого токена нет или его не удалось обновить")
-                    }
-                    settings.saveLastGarminAccount(account)
+                    tokens?.let { garminTokenStore.save(account, it) }
                 }
+                if (tokens == null) {
+                    throw RuntimeException("Нет действующего токена для аккаунта $account: добавь/перелогинь его через «＋» у выбора аккаунта")
+                }
+                settings.saveLastGarminAccount(account)
                 val api = GarminApi(auth, log = ::appendLog)
                 withContext(Dispatchers.IO) {
-                    api.upload(plan, tokens!!, skipCross, dryRun, testFirstWeek, clearAll, clearPast, clearBefore)
+                    api.upload(plan, tokens!!, skipCross, dryRun, testFirstWeek, clearAll, clearPast, clearBefore, allDates)
                 }
             } catch (e: Exception) {
                 appendLog("ОШИБКА: ${e.message}")

@@ -71,10 +71,15 @@ ACWR и фита systemic-утомления по HRV/RHR — иначе тяж�
              elevation_gain_m, elevation_loss_m, avg_temperature_c, avg_cadence_spm,
              avg_stride_length_m, calories, aerobic_training_effect,
              anaerobic_training_effect, manual_activity, elevation_corrected,
-             exported_at)
+             avg_grade_adjusted_pace_s_per_km, exported_at)
     Последние 10 колонок (elevation_gain_m .. elevation_corrected) — конфаунды EF, см.
     п.14 выше; для БД, созданных до этой версии скрипта, колонки добавляются
     автоматически при первом запуске (ensure_schema_migrations, ALTER TABLE ADD COLUMN).
+    avg_grade_adjusted_pace_s_per_km (см. п.15 ниже) — темп с поправкой на уклон
+    (directGradeAdjustedSpeed), заполняется ТОЛЬКО для уличных тренировок (не дорожка/
+    помещение/виртуальный бег) со значимым набором высоты (>= --grade-adjusted-min-
+    elevation-m, по умолчанию 30 м) — для остальных тренировок остаётся NULL, это не
+    ошибка/пропуск данных, а сознательный фильтр (см. fetch_grade_adjusted_pace).
     В отличие от wellness (который по умолчанию пропускает уже выгруженные дни),
     activities всегда перезаписывается (INSERT OR REPLACE) для каждой активности в
     заданном диапазоне дат — поэтому чтобы заполнить эти колонки для СТАРЫХ тренировок,
@@ -101,8 +106,9 @@ ACWR и фита systemic-утомления по HRV/RHR — иначе тяж�
 intervals, wellness/cross_activities/lactate_threshold туда не входят).
 
 АВТОРИЗАЦИЯ
-  Скрипт лежит рядом с garmin_plan_import.py и переиспользует его логику входа
-  (тот же токен в ~/.garth/<логин>, тот же обход блокировки через User-Agent).
+  Скрипт лежит рядом с plan_export_garmin.py (старое имя — garmin_plan_import.py, оба
+  варианта поддерживаются) и переиспользует его логику входа (тот же токен в
+  ~/.garth/<логин>, тот же обход блокировки через User-Agent).
   Если сохранена ровно одна учётка Garmin — подхватится сама.
 
   pip install garth==0.6.3
@@ -113,6 +119,9 @@ intervals, wellness/cross_activities/lactate_threshold туда не входя�
   python garmin_activities_export.py --days 90 --db calib_2026h1.db
   python garmin_activities_export.py --days 30 --dump-raw 12345678901   # сырой JSON одной активности (отладка схемы)
   python garmin_activities_export.py --days 30 --dump-activity-fields 12345678901   # отладка конфаундов EF (п.14): где реально лежат elevation/temperature/cadence на твоём аккаунте
+  python garmin_activities_export.py --dump-activity-details 12345678901   # поиск ключа темпа с учётом уклона (grade-adjusted pace), см. диалог 2026-08-17; бери ID реальной уличной тренировки с заметным набором высоты
+  python garmin_activities_export.py --days 90 --grade-adjusted-min-elevation-m 50  # тот же экспорт, но GAP считается только от 50 м набора (по умолчанию 30)
+  python garmin_activities_export.py --days 90 --no-grade-adjusted-pace             # без GAP вообще (быстрее — эндпоинт /details поточный, по секундам)
   python garmin_activities_export.py --db garmin_running.db --export-csv    # выгрузить обе таблицы БД в CSV рядом и выйти
 
   # Конвертация форматов туда-обратно, без обращения к Garmin:
@@ -179,6 +188,23 @@ intervals, wellness/cross_activities/lactate_threshold туда не входя�
     если какая-то колонка стабильно пустая там, где в самом Garmin Connect (веб/приложение)
     для этой активности данные видны — почти наверняка Garmin использует другое имя поля,
     поправь список кандидатов в _extract_ef_confounds().
+
+15. GRADE-ADJUSTED PACE (темп с поправкой на уклон) — ещё один способ снять с EF конфаунд
+    рельефа (см. п.14): в отличие от elevation_gain_m/elevation_loss_m (сырые ingredients,
+    из которых grade-adjusted EF никто пока не считает — см. TODO в garmin_calibration_fit.py),
+    avg_grade_adjusted_pace_s_per_km — уже готовая метрика Garmin/Firstbeat, посчитанная
+    по каждой секунде тренировки с учётом текущего уклона в этой точке трассы, а не только
+    по суммарному набору/сбросу за всю тренировку. Источник — ключ directGradeAdjustedSpeed
+    (м/с) в поточном эндпоинте /activity-service/activity/{id}/details (см.
+    fetch_grade_adjusted_pace() и диагностику --dump-activity-details, диалог 2026-08-17);
+    этот эндпоинт не используется остальным экспортом (он про секундные точки, а не про
+    сводку активности/лапов) и ощутимо тяжелее обычных запросов, поэтому запрашивается
+    ИЗБИРАТЕЛЬНО: только для уличных тренировок (OUTDOOR_RUN_TYPE_KEYS — исключены
+    treadmill_running/indoor_running/virtual_run, где либо нет реального рельефа, либо
+    уклон механический) со значимым набором высоты (elevation_gain_m >=
+    --grade-adjusted-min-elevation-m, по умолчанию 30 м) — --no-grade-adjusted-pace
+    отключает совсем. Для всех остальных активностей колонка остаётся NULL — это
+    сознательный фильтр, не ошибка/недостающие данные.
 """
 
 import os, sys, json, csv, sqlite3, argparse, datetime, statistics, time, importlib.util
@@ -191,16 +217,23 @@ except Exception:
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ---------------------------------------------------------------------------
-# Переиспользуем авторизацию из garmin_plan_import.py (тот же токен/UA-обход)
-# ---------------------------------------------------------------------------
+# Переиспользуем авторизацию из garmin_plan_import.py (тот же токен/UA-обход). Файл в разное
+# время назывался по-разному (garmin_plan_import.py -> plan_export_garmin.py, см. диалог
+# 2026-08-17) — пробуем оба имени по очереди, чтобы переименование модуля с логином не ломало
+# этот скрипт молча.
+_PLAN_IMPORT_CANDIDATES = ["plan_export_garmin.py", "garmin_plan_import.py"]
+
+
 def _load_plan_import_module():
-    path = os.path.join(HERE, "garmin_plan_import.py")
-    if not os.path.isfile(path):
-        sys.exit(f"Не найден garmin_plan_import.py рядом со скриптом ({path}) — нужен для входа в Garmin.")
-    spec = importlib.util.spec_from_file_location("garmin_plan_import", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    for name in _PLAN_IMPORT_CANDIDATES:
+        path = os.path.join(HERE, name)
+        if os.path.isfile(path):
+            spec = importlib.util.spec_from_file_location("garmin_plan_import", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    tried = ", ".join(_PLAN_IMPORT_CANDIDATES)
+    sys.exit(f"Не найден ни один из [{tried}] рядом со скриптом ({HERE}) — нужен для входа в Garmin.")
 
 def connect(*args, **kwargs):
     """Ленивая обёртка: garmin_plan_import.py (и garth) нужны только когда реально тянем
@@ -230,6 +263,13 @@ CROSS_TYPE_GROUPS = {
     "strength_training": {"strength_training"},
 }
 CROSS_TYPE_KEY_TO_GROUP = {k: g for g, ks in CROSS_TYPE_GROUPS.items() for k in ks}
+
+# "Уличные" беговые типы (реальный набор высоты/уклон существуют физически) — из
+# RUN_TYPE_KEYS исключены treadmill_running (дорожка — уклон механический/фиксированный,
+# набор высоты по GPS не имеет смысла) и indoor_running/virtual_run (без реального рельефа).
+# Используется, чтобы не тратить лишний запрос на grade-adjusted pace (fetch_grade_adjusted_pace)
+# там, где он физически не может быть информативным.
+OUTDOOR_RUN_TYPE_KEYS = RUN_TYPE_KEYS - {"treadmill_running", "indoor_running", "virtual_run"}
 
 # "активные" типы лапов у структурированных тренировок Garmin
 LAP_ACTIVE_TYPES = {"INTERVAL_ACTIVE", "ACTIVE", "INTERVAL", "REPEAT", "WORK"}
@@ -846,8 +886,24 @@ LAP_DRIFT_KEYS = ["cadence_drift_pct", "gct_drift_pct", "vertical_osc_drift_pct"
 
 
 def classify(total_duration_s, laps, long_threshold_s=75 * 60, hr_zones=None):
-    """Грубая эвристика типа тренировки. hr_zones — опц. dict с порогами (bpm) для
-    'threshold'/'easy', посчитанными по Карвонену, если заданы --max-hr/--rest-hr.
+    """Эвристика типа тренировки. hr_zones — опц. dict {z2_hi, z4_lo, ...}, посчитанный
+    estimate_hr_zones() (та же методика Карвонена + ПАНО, что и build_zones() в
+    build_report.py, раздел 3 отчёта 'Пульсовые зоны и актуальный темп') из уже накопленных
+    в БД данных Гармина (wellness.rhr, max_hr/avg_hr тренировок, lactate_threshold) — без
+    ручного ввода. None, если в БД ещё нет истории ПАНО (см. estimate_hr_zones).
+
+    ВАЖНО (см. диалог 2026-08-20): раньше порядок был typed-лапы -> CV темпа (interval) ->
+    HR-threshold -> длительность (long). Из-за этого длинная тренировка (по факту >=75 мин)
+    с ускорением/прогрессией/пикапом в середине (пульс и темп заметно меняются между лапами)
+    ошибочно ловилась правилом #2 (CV темпа) и целиком помечалась как 'interval' — реальный
+    пример: тренировка 150 мин с прогрессией темпа/пульса в середине (пульс поднимался почти
+    до ПАНО), классифицированная как interval, из-за чего пропадала и из 'long', и из подсчёта
+    марафонских вставок (marathon_time_per_activity ищет их только в long/easy). Длительность
+    >= long_threshold_s теперь проверяется РАНЬШЕ эвристики по разбросу темпа: 75+ минут — это
+    длинная тренировка, даже если внутри нее есть выраженный быстрый участок (см. раздел 10
+    отчёта, где марафонский темп внутри long и так учитывается отдельно). Правило #1
+    (типизированные Garmin work/rest лапы) по-прежнему проверяется первым и не переопределяется
+    длительностью — если часы сами разметили интервальную структуру, это надёжнее эвристики.
     """
     active = [l for l in laps if l["duration_s"] and l["duration_s"] > 0]
     if not active:
@@ -859,16 +915,48 @@ def classify(total_duration_s, laps, long_threshold_s=75 * 60, hr_zones=None):
     typed_active = [l for l in active if l["lap_type"] in LAP_ACTIVE_TYPES]
     typed_rest = [l for l in active if l["lap_type"] in LAP_REST_TYPES]
 
-    # 1) структурированная тренировка — Garmin сам разметил work/rest лапы
+    # 1) структурированная тренировка — Garmin сам разметил work/rest лапы.
+    #
+    # ВАЖНО (см. диалог 2026-08-20, тренировка 'Порог 2x20'' от 2026-07-09, id 23536204499):
+    # Гармин помимо work/rest дополнительно бьёт один непрерывный work-сегмент автолапами ПО
+    # КИЛОМЕТРУ — тот забег физически состоял из двух непрерывных 20-минутных пороговых блоков,
+    # но каждый блок распался на ~5 автолапов ACTIVE по ~4 мин (без единого rest-лапа ВНУТРИ
+    # блока, rest стоит только МЕЖДУ блоками). Если считать среднюю длительность каждого
+    # ОТДЕЛЬНОГО typed_active-лапа (как раньше — 4 мин), это ниже порога 8 мин, и тренировка
+    # ошибочно уходит в 'interval', хотя по факту это 'threshold' (2 длинных непрерывных
+    # усилия). Поэтому здесь сначала СКЛЕИВАЮТСЯ подряд идущие typed_active-лапы (без
+    # typed_rest-лапа между ними — то есть без разрыва на отдых) в непрерывные рабочие БЛОКИ,
+    # и порог 8 минут сравнивается со СРЕДНЕЙ ДЛИТЕЛЬНОСТЬЮ БЛОКА, а не отдельного лапа.
     if len(typed_active) >= 2 and len(typed_rest) >= 1:
-        avg_work_dur = statistics.mean(l["duration_s"] for l in typed_active)
+        work_blocks = []
+        block_dur = 0.0
+        for l in active:
+            if l["lap_type"] in LAP_ACTIVE_TYPES:
+                block_dur += l["duration_s"]
+            else:
+                if block_dur:
+                    work_blocks.append(block_dur)
+                block_dur = 0.0
+        if block_dur:
+            work_blocks.append(block_dur)
+        avg_work_dur = statistics.mean(work_blocks) if work_blocks else statistics.mean(l["duration_s"] for l in typed_active)
+        block_note = (
+            f"{len(work_blocks)} непрерывных work-блоков (склеены автолапы без rest внутри блока)"
+            if len(work_blocks) != len(typed_active) else f"{len(typed_active)} work"
+        )
         if avg_work_dur <= 8 * 60:
-            return "interval", f"типизированные лапы Garmin: {len(typed_active)} work / {len(typed_rest)} rest, ср. work {avg_work_dur:.0f}с"
+            return "interval", f"типизированные лапы Garmin: {block_note} / {len(typed_rest)} rest, ср. work {avg_work_dur:.0f}с"
         else:
-            return "threshold", f"типизированные лапы Garmin: {len(typed_active)} длинных work-сегментов (ср. {avg_work_dur:.0f}с) с rest между ними"
+            return "threshold", f"типизированные лапы Garmin: {block_note} (ср. {avg_work_dur:.0f}с) с rest между ними"
 
-    # 2) нет типизации — смотрим на разброс темпа/пульса между лапами (только если лапов много,
-    #    т.е. похоже на ручные/авто-лапы вокруг структурированной тренировки, а не 1км-авто на easy)
+    # 2) длительная — проверяется РАНЬШЕ эвристики по разбросу темпа (см. докстринг выше):
+    #    75+ минут суммарно — это длинная тренировка, даже если внутри неё есть быстрый участок.
+    if total_duration_s >= long_threshold_s:
+        return "long", f"суммарная длительность {total_duration_s/60:.0f} мин >= порога {long_threshold_s/60:.0f} мин"
+
+    # 3) нет типизации, короче порога 'long' — смотрим на разброс темпа между лапами (только
+    #    если лапов много, т.е. похоже на ручные/авто-лапы вокруг структурированной тренировки,
+    #    а не 1км-авто на easy)
     if len(active) >= 4 and len(paces) >= 4:
         cv_pace = statistics.pstdev(paces) / statistics.mean(paces)
         fastest = min(paces)
@@ -877,23 +965,33 @@ def classify(total_duration_s, laps, long_threshold_s=75 * 60, hr_zones=None):
             # есть явные быстрые и явные медленные (recovery) лапы
             fast_laps = [l for l in active if l["avg_pace_s_per_km"] and l["avg_pace_s_per_km"] <= fastest * 1.08]
             if len(fast_laps) >= 3 and statistics.mean(l["duration_s"] for l in fast_laps) <= 8 * 60:
-                return "interval", f"CV темпа {cv_pace:.2f}, {len(fast_laps)} быстрых интервалов среди {len(active)} лапов"
+                # ГЕЙТ ПО ПУЛЬСУ (см. диалог 2026-08-20): "быстрые" по темпу лапы должны быть
+                # выполнены с реальным повышенным усилием (>= низа зоны Z4, hr_zones["z4_lo"],
+                # см. build_zones/раздел 3 отчёта) — иначе это может быть просто уклон/сброс
+                # усталости/погрешность GPS-темпа на лёгкой тренировке, а не осознанный
+                # интервал. Если пульса на быстрых лапах нет вообще — не блокируем (старое
+                # поведение, лучше так, чем совсем терять сигнал).
+                fast_hrs = [l["avg_hr"] for l in fast_laps if l.get("avg_hr")]
+                hr_note = ""
+                hr_ok = True
+                if fast_hrs and hr_zones:
+                    mean_fast_hr = statistics.mean(fast_hrs)
+                    hr_ok = mean_fast_hr >= hr_zones["z4_lo"]
+                    hr_note = f", пульс быстрых лапов {mean_fast_hr:.0f} (порог интервала {hr_zones['z4_lo']})"
+                if hr_ok:
+                    return "interval", f"CV темпа {cv_pace:.2f}, {len(fast_laps)} быстрых интервалов среди {len(active)} лапов{hr_note}"
 
-    # 3) устойчивый повышенный пульс без выраженного разброса, средняя длительность
+    # 4) устойчивый повышенный пульс без выраженного разброса, средняя длительность
     if hrs:
         avg_hr_all = statistics.mean(hrs)
-        hi = hr_zones["threshold_lo"] if hr_zones else None
+        hi = hr_zones["z4_lo"] if hr_zones else None
         if hi and avg_hr_all >= hi and 12 * 60 <= total_duration_s <= 55 * 60:
             return "threshold", f"устойчивый пульс {avg_hr_all:.0f} >= порога зоны {hi}, длительность {total_duration_s/60:.0f} мин"
-
-    # 4) длительная
-    if total_duration_s >= long_threshold_s:
-        return "long", f"суммарная длительность {total_duration_s/60:.0f} мин >= порога {long_threshold_s/60:.0f} мин"
 
     # 5) легкая по умолчанию (если пульс невысокий) или mixed, если пульс высокий но не подошло выше
     if hrs:
         avg_hr_all = statistics.mean(hrs)
-        lo = hr_zones["easy_hi"] if hr_zones else None
+        lo = hr_zones["z2_hi"] if hr_zones else None
         if lo is None or avg_hr_all <= lo:
             return "easy", f"средний пульс {avg_hr_all:.0f}, длительность {total_duration_s/60:.0f} мин"
         return "mixed", f"не подошло ни под один профиль уверенно (ср.пульс {avg_hr_all:.0f}, {total_duration_s/60:.0f} мин) — разобрать вручную"
@@ -940,6 +1038,7 @@ CREATE TABLE IF NOT EXISTS activities (
     cadence_drift_pct          REAL,
     gct_drift_pct              REAL,
     vertical_osc_drift_pct     REAL,
+    avg_grade_adjusted_pace_s_per_km REAL,
     exported_at         TEXT
 );
 CREATE TABLE IF NOT EXISTS intervals (
@@ -958,6 +1057,7 @@ CREATE TABLE IF NOT EXISTS intervals (
     stride_length_mm           REAL,
     avg_respiration_rate       REAL,
     workout_compliance_score   INTEGER,
+    avg_grade_adjusted_pace_s_per_km REAL,
     PRIMARY KEY (activity_id, idx),
     FOREIGN KEY (activity_id) REFERENCES activities(activity_id)
 );
@@ -1037,12 +1137,13 @@ ACTIVITY_MIGRATION_COLUMNS = [
     ("vigorous_intensity_min", "REAL"), ("hr_time_in_zone_1", "REAL"), ("hr_time_in_zone_2", "REAL"),
     ("hr_time_in_zone_3", "REAL"), ("hr_time_in_zone_4", "REAL"), ("hr_time_in_zone_5", "REAL"),
     ("cadence_drift_pct", "REAL"), ("gct_drift_pct", "REAL"), ("vertical_osc_drift_pct", "REAL"),
+    ("avg_grade_adjusted_pace_s_per_km", "REAL"),
 ]
 
 INTERVAL_MIGRATION_COLUMNS = [
     ("avg_cadence_spm", "REAL"), ("ground_contact_time_ms", "REAL"), ("vertical_oscillation_mm", "REAL"),
     ("vertical_ratio", "REAL"), ("stride_length_mm", "REAL"), ("avg_respiration_rate", "REAL"),
-    ("workout_compliance_score", "INTEGER"),
+    ("workout_compliance_score", "INTEGER"), ("avg_grade_adjusted_pace_s_per_km", "REAL"),
 ]
 
 WELLNESS_MIGRATION_COLUMNS = [
@@ -1077,10 +1178,10 @@ def open_db(path):
     return con
 
 
-_ACTIVITY_EXTRA_KEYS = EF_CONFOUND_KEYS + LAP_DRIFT_KEYS
+_ACTIVITY_EXTRA_KEYS = EF_CONFOUND_KEYS + LAP_DRIFT_KEYS + ["avg_grade_adjusted_pace_s_per_km"]
 _INTERVAL_EXTRA_KEYS = ["avg_cadence_spm", "ground_contact_time_ms", "vertical_oscillation_mm",
                         "vertical_ratio", "stride_length_mm", "avg_respiration_rate",
-                        "workout_compliance_score"]
+                        "workout_compliance_score", "avg_grade_adjusted_pace_s_per_km"]
 
 
 def upsert_activity(con, a, exported_at):
@@ -1316,15 +1417,189 @@ def convert(in_path, out_format, out_path):
         sys.exit(f"Неизвестный --out-format: {out_format}")
 
 
-def karvonen_zones(max_hr, rest_hr):
-    """Возвращает грубые пороги по Карвонену: easy_hi (граница Z2/Z3), threshold_lo (граница Z3/Z4)."""
-    if not max_hr or not rest_hr:
+
+def _read_lt_from_db(db_path):
+    con = sqlite3.connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT date, threshold_hr FROM lactate_threshold WHERE threshold_hr IS NOT NULL ORDER BY date"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    con.close()
+    return rows
+
+
+def _read_wellness_rhr_from_db(db_path):
+    con = sqlite3.connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT date, rhr FROM wellness WHERE rhr IS NOT NULL ORDER BY date"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    con.close()
+    return rows
+
+
+def _read_hr_pairs_from_db(db_path):
+    con = sqlite3.connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT max_hr, avg_hr FROM activities WHERE max_hr IS NOT NULL AND avg_hr IS NOT NULL"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    con.close()
+    return rows
+
+
+def _pano_from_db(db_path, recent_days=120):
+    """Порт garmin_pano_estimate() из build_report.py (см. отчёт, раздел 1 'Пульс ПАНО') —
+    среднее threshold_hr за последние recent_days дней от последней записи lactate_threshold
+    в уже накопленной локальной БД. Возвращает None, если истории ПАНО в БД ещё нет
+    (например, самый первый экспорт с чистой БД)."""
+    rows = _read_lt_from_db(db_path)
+    if not rows:
         return None
-    hrr = max_hr - rest_hr
-    return {
-        "easy_hi": round(rest_hr + hrr * 0.75),        # верх Z2 (~75% HRR)
-        "threshold_lo": round(rest_hr + hrr * 0.87),   # низ Z4 (~87% HRR)
-    }
+    dates = [datetime.date.fromisoformat(str(d)[:10]) for d, _ in rows]
+    last_date = max(dates)
+    cutoff = last_date - datetime.timedelta(days=recent_days)
+    recent = [hr for (d, hr), dt in zip(rows, dates) if dt >= cutoff]
+    if not recent:
+        recent = [hr for _, hr in rows]
+    return round(statistics.mean(recent))
+
+
+def _rest_hr_from_db(db_path, recent_days=90, fallback_rhr=None):
+    """Порт estimate_resting_hr() из build_report.py — среднее wellness.rhr за последние
+    recent_days дней от последней записи."""
+    rows = _read_wellness_rhr_from_db(db_path)
+    if not rows:
+        return fallback_rhr if fallback_rhr else 50
+    dates = [datetime.date.fromisoformat(str(d)[:10]) for d, _ in rows]
+    last_date = max(dates)
+    cutoff = last_date - datetime.timedelta(days=recent_days)
+    recent = [rhr for (d, rhr), dt in zip(rows, dates) if dt >= cutoff]
+    if not recent:
+        recent = [rhr for _, rhr in rows]
+    return statistics.mean(recent)
+
+
+def _max_hr_from_db(db_path, fallback_max_hr=None, abs_ceiling=215, max_spread=60):
+    """Порт estimate_max_hr() из build_report.py — max(max_hr) только по тренировкам без
+    похожего на выброс разрыва max_hr-avg_hr (защита от одиночных скачков оптического
+    пульсометра, см. докстринг оригинала в build_report.py)."""
+    rows = _read_hr_pairs_from_db(db_path)
+    clean = [mh for mh, ah in rows if mh <= abs_ceiling and (mh - ah) <= max_spread]
+    if clean:
+        return round(max(clean))
+    if fallback_max_hr:
+        return round(fallback_max_hr)
+    return 195
+
+
+def build_zones_for_classifier(rhr, pano, max_hr, z2_hrr=0.60, z3_hrr=0.70):
+    """Порт build_zones() из build_report.py (см. отчёт, раздел 3 'Пульсовые зоны и актуальный
+    темп') — та же методика Карвонена (%HRR) + ПАНО из истории Гармина как верх Z4, чтобы
+    классификатор тренировок здесь использовал ТЕ ЖЕ пульсовые зоны, что и отчёт. Возвращает
+    только то, что нужно classify(): z2_hi (верх лёгкой/аэробной зоны) и z4_lo (низ порогового,
+    то есть настоящего 'рабочего' усилия)."""
+    hrr = max_hr - rhr
+    z2_lo = round(rhr + z2_hrr * hrr)
+    z3_lo_hrr = round(rhr + z3_hrr * hrr)
+    z4_hi = pano
+    z2_hi = z3_lo_hrr - 1
+    z3_lo = z2_hi + 1
+    z4_lo = round((z3_lo + z4_hi) / 2)
+    return {"z2_hi": z2_hi, "z4_lo": z4_lo, "pano": pano, "rhr": round(rhr, 1), "max_hr": max_hr}
+
+
+def estimate_hr_zones(db_path):
+    """Оценивает пороги пульса для classify() из уже накопленной локальной БД (та же методика,
+    что и build_zones() в build_report.py, раздел 3 отчёта): rest_hr — из wellness.rhr
+    (реальные данные Гармина, см. _rest_hr_from_db), max_hr — устойчивая оценка по фактическим
+    max_hr/avg_hr тренировок (см. _max_hr_from_db), ПАНО — из истории lactate_threshold
+    (Гармин/Firstbeat, см. _pano_from_db). Никаких ручных вводов не требуется — все три
+    величины берутся из данных, которые Гармин уже прислал. Возвращает None, если в БД ещё
+    нет истории ПАНО (lactate_threshold) — например, самый первый экспорт с чистой БД; тогда
+    threshold/easy-классификация по абсолютному пульсу временно пропускается (см. export())."""
+    if not db_path or not os.path.isfile(db_path):
+        return None
+    pano = _pano_from_db(db_path)
+    if pano is None:
+        return None
+    rhr = _rest_hr_from_db(db_path)
+    max_hr = _max_hr_from_db(db_path)
+    return build_zones_for_classifier(rhr, pano, max_hr)
+
+
+def reclassify_activities(db_path, long_threshold_s=75 * 60, activity_ids=None, verbose=True):
+    """Второй проход: пересчитывает type_guess/type_reason для уже сохранённых в БД активностей
+    (см. диалог 2026-08-20: 'надо делать в два прохода. Сначала экспортируем, потом считаем
+    поля'). Раньше classify() вызывался ПРЯМО во время выгрузки каждой активности из Garmin API,
+    используя hr_zones, посчитанные по БД ДО того, как в неё попали данные текущего запуска
+    (включая свежую историю ПАНО/wellness.rhr, которые сама же выгрузка и добавляет чуть позже
+    в export_wellness()) — то есть классификация первой партии активностей в каждом запуске
+    всегда была немного 'вслепую'. Теперь это отдельный шаг, который:
+      1) не делает ни одного обращения к Garmin API — только читает уже сохранённые activities/
+         intervals из локальной БД (db_path);
+      2) считает hr_zones (estimate_hr_zones) по ПОЛНОСТЬЮ обновлённой БД — то есть уже видит
+         и только что выгруженные активности, и свежую историю ПАНО/RHR из wellness;
+      3) может быть запущен отдельно (--reclassify-only) в любой момент — например, сразу после
+         правки логики classify() (как это уже случалось, см. диалог 2026-08-20 про 150-минутную
+         тренировку) — чтобы пересчитать типы по ВСЕЙ истории без повторной выгрузки из Гармина.
+    activity_ids — опц. список ID, чтобы пересчитать только часть базы (иначе — вся activities).
+    """
+    hr_zones = estimate_hr_zones(db_path)
+    if hr_zones:
+        print(
+            f"Пороги пульса для классификатора (те же зоны, что в отчёте build_report.py, "
+            f"раздел 3: rhr={hr_zones['rhr']}, max_hr={hr_zones['max_hr']}, ПАНО={hr_zones['pano']}): "
+            f"z2_hi={hr_zones['z2_hi']}, z4_lo={hr_zones['z4_lo']}"
+        )
+    else:
+        print("Пороги пульса не посчитаны (в БД ещё нет истории ПАНО lactate_threshold) — "
+              "классификация threshold/easy по абсолютному пульсу будет пропущена, "
+              "но interval/long/mixed определятся и без них.")
+
+    con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+    q = "SELECT activity_id, date, name, duration_s, type_guess FROM activities"
+    params = ()
+    if activity_ids:
+        placeholders = ",".join("?" * len(activity_ids))
+        q += f" WHERE activity_id IN ({placeholders})"
+        params = tuple(activity_ids)
+    q += " ORDER BY date"
+    acts = con.execute(q, params).fetchall()
+
+    n_changed = 0
+    for i, act in enumerate(acts, 1):
+        aid = act["activity_id"]
+        lap_rows = con.execute(
+            "SELECT duration_s, avg_pace_s_per_km, avg_hr, lap_type FROM intervals "
+            "WHERE activity_id=? ORDER BY idx",
+            (aid,),
+        ).fetchall()
+        laps = [
+            {"duration_s": r["duration_s"], "avg_pace_s_per_km": r["avg_pace_s_per_km"],
+             "avg_hr": r["avg_hr"], "lap_type": r["lap_type"] or "ACTIVE"}
+            for r in lap_rows
+        ]
+        type_guess, reason = classify(act["duration_s"] or 0, laps, long_threshold_s=long_threshold_s, hr_zones=hr_zones)
+        if act["type_guess"] != type_guess:
+            n_changed += 1
+        con.execute(
+            "UPDATE activities SET type_guess=?, type_reason=? WHERE activity_id=?",
+            (type_guess, reason, aid),
+        )
+        if verbose:
+            print(f"[{i}/{len(acts)}] {act['date']} {(act['name'] or '')[:40]:40s} -> {type_guess:10s} ({len(laps)} лапов)")
+    con.commit()
+    con.close()
+    print(f"Пересчитано типов: {len(acts)}, изменилось: {n_changed}")
+    return len(acts), n_changed
 
 
 def export(args):
@@ -1336,13 +1611,12 @@ def export(args):
     else:
         start_date = (datetime.date.today() - datetime.timedelta(days=args.days)).isoformat()
 
-    hr_zones = karvonen_zones(args.max_hr, args.rest_hr)
-    if hr_zones:
-        print(f"Пороги пульса (Карвонен, HRmax={args.max_hr}, HRrest={args.rest_hr}): {hr_zones}")
-    else:
-        print("Пороги пульса не заданы (--max-hr/--rest-hr) — классификация threshold/easy по абсолютному пульсу будет пропущена, "
-              "но interval/long/mixed определятся и без них.")
-
+    # Два прохода (см. диалог 2026-08-20): здесь (проход 1) только выгружаем сырые данные из
+    # Garmin и сохраняем их в БД, БЕЗ классификации type_guess — она требует пульсовых зон
+    # (rest_hr/max_hr/ПАНО), а зоны надёжнее считать по УЖЕ ПОЛНОСТЬЮ обновлённой локальной БД
+    # (включая только что выгруженную wellness/lactate_threshold этого же запуска), а не по
+    # тому, что было в базе ДО текущей выгрузки. Проход 2 — reclassify_activities() в конце
+    # export(), после export_wellness()/export_cross_training().
     print(f"Период: {start_date} .. {end_date}")
     acts = fetch_activities(garth, start_date, end_date)
     acts = [a for a in acts if is_running(a)]
@@ -1372,7 +1646,9 @@ def export(args):
         laps_raw, lap_source = fetch_laps(garth, aid)
         laps = [normalize_lap(l, idx + 1) for idx, l in enumerate(laps_raw)]
 
-        type_guess, reason = classify(duration or 0, laps, long_threshold_s=args.long_threshold * 60, hr_zones=hr_zones)
+        # type_guess/type_reason считаются ПОЗЖЕ, отдельным проходом (reclassify_activities(),
+        # см. конец export()) — не здесь, см. докстринг reclassify_activities().
+        type_guess, reason = None, "ожидает пересчёта (проход 2, см. reclassify_activities)"
         # impactLoad (и на будущее — любой другой конфаунд, который Garmin решит переносить между
         # ответами) реально приходит только в detail-объекте, не в bulk-списке (см. докстринг
         # _EF_CONFOUND_FIELD_CANDIDATES) — по умолчанию делаем доп. запрос на активность, чтобы его
@@ -1384,6 +1660,24 @@ def export(args):
                 confound_source = {**act, "_activity_detail": detail}
         confounds = _extract_ef_confounds(confound_source, temperature_unit=args.temperature_unit)
         drift = compute_lap_drift(laps) or {"cadence_drift_pct": None, "gct_drift_pct": None, "vertical_osc_drift_pct": None}
+
+        # Grade-adjusted pace (directGradeAdjustedSpeed) — и в среднем за тренировку, и ПО КАЖДОМУ
+        # ЛАПУ (см. fetch_grade_adjusted_pace_by_lap) — только для уличных тренировок со значимым
+        # набором высоты (--grade-adjusted-min-elevation-m): для ровных/беговой дорожки/помещения
+        # метрика неинформативна или отсутствует, а сам запрос к /details — лишний (медленный,
+        # поточные данные по секундам).
+        sport_key = ((act.get("activityType") or {}).get("typeKey") or "").lower()
+        elevation_gain_m = confounds.get("elevation_gain_m")
+        avg_gap_s_per_km = None
+        if (not args.no_grade_adjusted_pace and sport_key in OUTDOOR_RUN_TYPE_KEYS
+                and elevation_gain_m is not None and elevation_gain_m >= args.grade_adjusted_min_elevation_m):
+            avg_gap_s_per_km, lap_gap_by_idx = fetch_grade_adjusted_pace_by_lap(
+                garth, aid, laps, max_chart_size=args.max_chart_size)
+            for lap in laps:
+                lap["avg_grade_adjusted_pace_s_per_km"] = lap_gap_by_idx.get(lap["idx"])
+        else:
+            for lap in laps:
+                lap["avg_grade_adjusted_pace_s_per_km"] = None
 
         results.append({
             "activity_id": aid,
@@ -1403,8 +1697,10 @@ def export(args):
             "intervals": laps,
             **confounds,
             **drift,
+            "avg_grade_adjusted_pace_s_per_km": avg_gap_s_per_km,
         })
-        print(f"[{i}/{len(acts)}] {date} {name[:40]:40s} -> {type_guess:10s} ({lap_source}, {len(laps)} лапов)")
+        gap_note = f", GAP {fmt_pace(avg_gap_s_per_km)}/км" if avg_gap_s_per_km else ""
+        print(f"[{i}/{len(acts)}] {date} {name[:40]:40s} -> выгружено ({lap_source}, {len(laps)} лапов{gap_note})")
 
     exported_at = start_local_now = datetime.datetime.now().replace(microsecond=0).isoformat()
     con = open_db(args.db)
@@ -1425,6 +1721,11 @@ def export(args):
 
     if not args.no_cross_training:
         export_cross_training(garth, args, start_date, end_date)
+
+    # Проход 2 (см. диалог 2026-08-20): классификация — теперь, когда БД уже содержит и только
+    # что выгруженные активности, и свежую wellness/lactate_threshold этого же запуска.
+    print()
+    reclassify_activities(args.db, long_threshold_s=args.long_threshold * 60)
 
     if args.export_csv_after:
         export_csv_from_db(args.db)
@@ -1606,6 +1907,195 @@ def dump_activity_fields(garth, activity_id, start_date, end_date):
 
 
 # ---------------------------------------------------------------------------
+# --dump-activity-details — поиск ключа темпа с учётом уклона (grade-adjusted pace/speed),
+# см. диалог 2026-08-17. В отличие от --dump-activity-fields (который смотрит list_entry и
+# /activity-service/activity/{id} — это СВОДКА активности и СВОДКА по лапам), grade-adjusted
+# pace Garmin отдаёт только в ПОТОКОВЫХ данных по секундам — эндпоинт
+# /activity-service/activity/{id}/details, который обычный экспорт (export()) и
+# dump_activity_fields() вообще не запрашивают. Ответ этого эндпоинта устроен иначе, чем
+# остальные объекты Garmin: не плоский JSON с именованными полями, а
+#   metricDescriptors: [{"key": "directSpeed", "metricsIndex": 3, ...}, ...]  — описание КОЛОНОК
+#   activityDetailMetrics: [{"metrics": [v0, v1, v2, ...]}, ...]              — САМИ ТОЧКИ,
+#     где значение под индексом metricsIndex каждого дескриптора соответствует своей колонке
+# то есть нужное значение — это не значение по имени ключа, а позиция в массиве metrics,
+# указанная в metricDescriptors. Отдельно проверять по одной активности необходимо, потому что
+# набор ключей (и их порядок) может отличаться по типам тренировок/устройствам — точное имя
+# ("directGradeAdjustedSpeed" — самое вероятное по практике других интеграций с Garmin Connect,
+# но НЕ подтверждено на этом аккаунте) и его metricsIndex нужно увидеть в реальном ответе.
+CONFOUND_KEYWORDS_DETAILS = ["grade", "adjust", "speed", "elev", "pace"]
+
+# Подтверждено на реальном аккаунте через --dump-activity-details (диалог 2026-08-17):
+# ключ в metricDescriptors — "directGradeAdjustedSpeed" (м/с). Второй кандидат оставлен
+# на случай другого устройства/версии приложения Garmin, где ключ мог бы называться
+# иначе (неофициальный API — гарантий стабильности имени нет).
+GRADE_ADJUSTED_SPEED_KEY_CANDIDATES = ["directGradeAdjustedSpeed", "gradeAdjustedSpeed"]
+
+
+GRADE_ADJUSTED_DISTANCE_KEY_CANDIDATES = ["sumDistance"]
+
+
+def fetch_grade_adjusted_pace_by_lap(garth, activity_id, laps, max_chart_size=2000):
+    """Темп с поправкой на уклон (grade-adjusted pace, GAP) — и за тренировку целиком, и
+    ПО КАЖДОМУ ЛАПУ отдельно. В отличие от avg_pace_s_per_km (сырой темп по GPS-дистанции),
+    GAP компенсирует набор/сброс высоты — на этом основана попытка снять с EF (см. п.14
+    докстринга) конфаунд рельефа: сырой темп на холмистой трассе занижает EF относительно
+    ровной трассы при той же физиологической нагрузке. Средний по всей тренировке GAP
+    смешивает подъёмы/спуски/равнину в одно число — если рельеф неравномерный (набор в
+    начале, ровный участок в конце и т.п.), полапная разбивка нужна, чтобы увидеть GAP
+    именно там, где физически был подъём, а не размазанным по всей дистанции.
+
+    Метрика приходит ТОЛЬКО из поточного эндпоинта /activity-service/activity/{id}/details
+    (см. dump_activity_details() выше и диалог 2026-08-17) — не из списка активностей и не
+    из /activity-service/activity/{id} (обычный detail-объект). Формат ответа: список
+    metricDescriptors описывает колонки (key -> metricsIndex), activityDetailMetrics —
+    сами точки по секундам/интервалам.
+
+    Разбивка по лапам сделана через КУМУЛЯТИВНУЮ ДИСТАНЦИЮ (sumDistance каждой точки
+    потока сравнивается с накопленной суммой distance_m лапов из normalize_lap), а не
+    через время/timestamp: у лапов нет проверенного на реальном аккаунте поля начала/конца
+    в том же формате эпохи, что directTimestamp потока, а distance_m у лапов есть всегда
+    (и sumDistance у потока — тоже, тот же физический счётчик GPS-дистанции), поэтому
+    точки надёжнее сопоставлять по общей для обоих источников величине. Если у какого-то
+    лапа distance_m отсутствует — для него GAP не считается (пропускается), кумулятивная
+    сумма для последующих лапов при этом не сдвигается специально — просто такой лап
+    выпадает из разбивки, остальные считаются корректно.
+
+    Best-effort: если эндпоинт недоступен, нужного дескриптора нет (старые часы/короткая
+    активность без потока) или все точки пустые — возвращает (None, {}), не падает.
+    Вызывается только для уличных тренировок со значимым набором высоты (см. export(),
+    --grade-adjusted-min-elevation-m/--no-grade-adjusted-pace) — не тратим лишний запрос
+    на каждую активность. Возвращает (overall_s_per_km, {lap_idx: s_per_km})."""
+    try:
+        path = f"/activity-service/activity/{activity_id}/details?maxChartSize={max_chart_size}&maxPolylineSize={max_chart_size}"
+        details = garth.connectapi(path)
+    except Exception:
+        return None, {}
+    if not isinstance(details, dict):
+        return None, {}
+    descriptors = details.get("metricDescriptors") or []
+
+    def _find_idx(candidates):
+        for key in candidates:
+            for d in descriptors:
+                if (d.get("key") or "") == key:
+                    return d.get("metricsIndex")
+        return None
+
+    idx_gap = _find_idx(GRADE_ADJUSTED_SPEED_KEY_CANDIDATES)
+    if idx_gap is None:
+        return None, {}
+    idx_dist = _find_idx(GRADE_ADJUSTED_DISTANCE_KEY_CANDIDATES)
+
+    points = details.get("activityDetailMetrics") or []
+    all_values = []
+    dist_gap_points = []  # (кумулятивная дистанция потока, м; GAP, м/с)
+    for p in points:
+        metrics = p.get("metrics") or []
+        if idx_gap >= len(metrics):
+            continue
+        gap_v = metrics[idx_gap]
+        if gap_v is None:
+            continue
+        all_values.append(gap_v)
+        if idx_dist is not None and idx_dist < len(metrics) and metrics[idx_dist] is not None:
+            dist_gap_points.append((metrics[idx_dist], gap_v))
+
+    overall = s_per_km(statistics.mean(all_values)) if all_values else None
+
+    per_lap = {}
+    if dist_gap_points:
+        dist_gap_points.sort(key=lambda x: x[0])
+        cum = 0.0
+        for lap in laps:
+            dist = lap.get("distance_m")
+            if not dist:
+                continue
+            start, end = cum, cum + dist
+            cum = end
+            bucket = [g for d, g in dist_gap_points if start <= d <= end]
+            if bucket:
+                per_lap[lap["idx"]] = s_per_km(statistics.mean(bucket))
+
+    return overall, per_lap
+
+
+def dump_activity_details(garth, activity_id, max_chart_size=4000):
+    """Запрашивает /activity-service/activity/{id}/details (поточные данные по секундам —
+    ДРУГОЙ эндпоинт, чем --dump-raw/--dump-activity-fields, которые смотрят только сводку
+    активности и сводку по лапам) и ищет в metricDescriptors ключи, похожие на "темп/скорость с
+    учётом уклона" (grade-adjusted pace/speed).
+
+    max_chart_size — Garmin по этому эндпоинту иногда прорежает точки, если не попросить явно
+    побольше (по умолчанию просим с запасом; если тренировка длиннее — увеличь --max-chart-size).
+
+    Сохраняет полный сырой JSON в activity_ID_details_raw.json (он может быть большим — тысячи
+    точек по секундам) и печатает:
+      1) все metricDescriptors целиком (это компактный список — по нему сразу видно точное имя
+         ключа на твоём аккаунте, даже если оно не попадёт в подсветку по ключевым словам ниже);
+      2) отдельно подсвеченные кандидаты по ключевым словам (grade/adjust/speed/elev/pace);
+      3) если найден правдоподобный кандидат — по 10 первых ненулевых значений этой колонки из
+         activityDetailMetrics, чтобы визуально убедиться, что это не пустая/нулевая колонка.
+    """
+    activity_id = int(activity_id)
+    path = f"/activity-service/activity/{activity_id}/details?maxChartSize={max_chart_size}&maxPolylineSize={max_chart_size}"
+    print(f"Запрашиваю {path} ...")
+    details = garth.connectapi(path)
+
+    out_file = f"activity_{activity_id}_details_raw.json"
+    with open(out_file, "w", encoding="utf-8") as f:
+        json.dump(details, f, ensure_ascii=False, indent=2)
+    print(f"Полный сырой JSON сохранён в {out_file} (может быть большим — это поточные данные по секундам).")
+
+    if not isinstance(details, dict):
+        print(f"  Неожиданный тип ответа: {type(details)} — открой {out_file} и посмотри вручную.")
+        return
+
+    descriptors = details.get("metricDescriptors") or []
+    print(f"\nВсего metricDescriptors: {len(descriptors)}")
+    if not descriptors:
+        print("  Пусто — либо у активности нет поточных данных (короткая/помеченная вручную/без GPS), "
+              "либо Garmin вернул ответ другой формы — смотри сырой JSON целиком.")
+        return
+
+    print("\n  Все metricDescriptors (ключ -> metricsIndex):")
+    for d in descriptors:
+        print(f"    {d.get('key')!r:45s} metricsIndex={d.get('metricsIndex')}")
+
+    candidates = [d for d in descriptors if any(kw in str(d.get("key", "")).lower() for kw in CONFOUND_KEYWORDS_DETAILS)]
+    print(f"\n  Кандидаты по ключевым словам ({', '.join(CONFOUND_KEYWORDS_DETAILS)}):")
+    if not candidates:
+        print("    (ничего не нашлось — либо Garmin называет метрику совсем иначе, смотри полный "
+              "список metricDescriptors выше целиком, либо на этом устройстве/типе активности "
+              "grade-adjusted pace вообще не считается)")
+    else:
+        for d in candidates:
+            print(f"    {d.get('key')!r} (metricsIndex={d.get('metricsIndex')})")
+
+        points = details.get("activityDetailMetrics") or []
+        print(f"\n  Точек в activityDetailMetrics: {len(points)}")
+        for d in candidates:
+            idx = d.get("metricsIndex")
+            if idx is None:
+                continue
+            sample = []
+            for p in points:
+                metrics = p.get("metrics") or []
+                if idx < len(metrics) and metrics[idx] is not None:
+                    sample.append(metrics[idx])
+                if len(sample) >= 10:
+                    break
+            print(f"    {d.get('key')!r}: первые ненулевые значения (сырые, ед. измерения см. в "
+                  f"metricDescriptors[...].unit в JSON) = {sample!r}")
+            if not sample:
+                print(f"      (все значения этой колонки пустые/None в первых точках — возможно, "
+                      f"метрика посчитана не для всей тренировки, или это не тот ключ)")
+
+    print("\nЕсли нашёлся правдоподобный ключ (например, что-то вроде directGradeAdjustedSpeed) — "
+          "скажи мне его точное имя и metricsIndex, и я допишу в export() агрегацию этой метрики "
+          "по границам лап (среднее между началом и концом каждой лапы) в новую колонку intervals.")
+
+
+# ---------------------------------------------------------------------------
 # --dump-wellness-fields — отладка показателей здоровья/восстановления (сон/HRV/RHR/
 # Body Battery/стресс/training readiness/ПАНО), см. докстринг про wellness выше и
 # export_wellness()/fetch_wellness_day(). Та же идея, что и dump_activity_fields():
@@ -1686,8 +2176,6 @@ def main():
     ap.add_argument("--days", type=int, default=365, help="если --start-date не задан — сколько дней назад от сегодня выгружать (по умолчанию 365)")
     ap.add_argument("--db", default="garmin_running.db", help="путь к файлу SQLite (создаётся, если не существует; по умолчанию garmin_running.db)")
     ap.add_argument("--long-threshold", type=float, default=75, help="порог длительности (мин) для типа 'long' (по умолчанию 75)")
-    ap.add_argument("--max-hr", type=int, help="макс. пульс атлета — для порогов threshold/easy по Карвонену")
-    ap.add_argument("--rest-hr", type=int, help="пульс покоя атлета — для порогов threshold/easy по Карвонену")
     ap.add_argument("--temperature-unit", choices=["c", "f"], default="c",
                      help="в какой единице Garmin отдаёт minTemperature/maxTemperature на твоём аккаунте — "
                           "c (Цельсий, по умолчанию) или f (Фаренгейт, тогда сконвертируется в Цельсий в "
@@ -1697,6 +2185,17 @@ def main():
                      help="не делать доп. запрос /activity-service/activity/{id} на каждую активность ради "
                           "impact_load (см. докстринг _EF_CONFOUND_FIELD_CANDIDATES) — быстрее, но impact_load "
                           "останется пустым и orthopedic-фит в garmin_calibration_fit.py откатится на прокси")
+    ap.add_argument("--no-grade-adjusted-pace", action="store_true",
+                     help="не запрашивать /activity-service/activity/{id}/details ради grade-adjusted pace "
+                          "(directGradeAdjustedSpeed, см. fetch_grade_adjusted_pace/--dump-activity-details) — "
+                          "быстрее (эндпоинт поточный, по секундам), но avg_grade_adjusted_pace_s_per_km "
+                          "останется пустым для всех тренировок")
+    ap.add_argument("--grade-adjusted-min-elevation-m", type=float, default=30,
+                     help="минимальный набор высоты (elevation_gain_m), начиная с которого для уличной "
+                          "тренировки (см. OUTDOOR_RUN_TYPE_KEYS — дорожка/помещение/виртуальный бег "
+                          "исключены) дополнительно запрашивается grade-adjusted pace (по умолчанию 30 м; "
+                          "ниже — рельеф обычно не искажает EF настолько, чтобы платить лишним запросом "
+                          "по каждой такой активности)")
     ap.add_argument("--dump-raw", metavar="ACTIVITY_ID", help="только выгрузить сырой JSON одной активности (для отладки схемы Garmin API) и выйти")
     ap.add_argument("--dump-activity-fields", metavar="ACTIVITY_ID",
                      help="отладка конфаундов EF (см. докстринг п.14): найти активность и в списке "
@@ -1706,6 +2205,22 @@ def main():
                           "(elevation/temp/cadence/...) — используй, если после обычного экспорта нужные "
                           "колонки пустые, чтобы понять точные имена полей на своём аккаунте; диапазон "
                           "поиска — --start-date/--end-date/--days, как для обычного экспорта")
+    ap.add_argument("--dump-activity-details", metavar="ACTIVITY_ID",
+                     help="поиск ключа темпа с учётом уклона (grade-adjusted pace/speed, см. диалог "
+                          "2026-08-17): запросить /activity-service/activity/{id}/details (поточные "
+                          "данные по секундам — ДРУГОЙ эндпоинт, чем --dump-raw/--dump-activity-fields), "
+                          "сохранить сырой JSON в activity_ID_details_raw.json и распечатать все "
+                          "metricDescriptors + подсветку кандидатов по ключевым словам "
+                          "(grade/adjust/speed/elev/pace). Выбери для проверки реальную уличную "
+                          "тренировку с заметным набором высоты (elevation_gain_m большой)")
+    ap.add_argument("--max-chart-size", type=int, default=4000,
+                     help="только для --dump-activity-details: сколько точек запросить у Garmin "
+                          "(по умолчанию 4000 — с запасом; увеличь для очень длинных тренировок)")
+    ap.add_argument("--reclassify-only", action="store_true",
+                     help="не тянуть Garmin — только пересчитать type_guess/type_reason для всей "
+                          "уже существующей --db (проход 2, см. reclassify_activities) и выйти. "
+                          "Полезно сразу после правки логики classify(), чтобы пересчитать типы "
+                          "по всей истории без повторной выгрузки из Гармина.")
     ap.add_argument("--export-csv", action="store_true", help="не тянуть Garmin — выгрузить обе таблицы уже существующей --db в CSV рядом и выйти")
     ap.add_argument("--export-csv-after", action="store_true", help="после обычной выгрузки дополнительно сохранить CSV-снимок БД")
     ap.add_argument("--in", dest="in_path", metavar="PATH",
@@ -1752,6 +2267,11 @@ def main():
             out_path = {"sqlite": base + ".db", "json": base + ".json", "csv": base + ".csv"}[args.out_format]
         convert(args.in_path, args.out_format, out_path)
         return
+    if args.reclassify_only:
+        if not os.path.isfile(args.db):
+            sys.exit(f"Файл БД не найден: {args.db}")
+        reclassify_activities(args.db, long_threshold_s=args.long_threshold * 60)
+        return
     if args.export_csv:
         if not os.path.isfile(args.db):
             sys.exit(f"Файл БД не найден: {args.db}")
@@ -1762,6 +2282,10 @@ def main():
         end_date = args.end_date or datetime.date.today().isoformat()
         start_date = args.start_date or (datetime.date.today() - datetime.timedelta(days=args.days)).isoformat()
         dump_activity_fields(garth, args.dump_activity_fields, start_date, end_date)
+        return
+    if args.dump_activity_details:
+        garth = connect(args.account, force_login=args.force_login)
+        dump_activity_details(garth, args.dump_activity_details, max_chart_size=args.max_chart_size)
         return
     if args.dump_wellness_raw:
         garth = connect(args.account, force_login=args.force_login)

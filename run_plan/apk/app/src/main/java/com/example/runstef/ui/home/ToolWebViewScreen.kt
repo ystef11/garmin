@@ -33,6 +33,7 @@ import com.example.runstef.network.INSTALL_ANDROID_PRINT_JS
 import com.example.runstef.network.OfflineCacheWebViewClient
 import com.example.runstef.network.WebPrintBridge
 import com.example.runstef.network.WebViewDownloads
+import com.example.runstef.network.enableZoom
 import kotlinx.coroutines.launch
 
 /**
@@ -44,7 +45,8 @@ import kotlinx.coroutines.launch
  * Логика сохранения самого файла (декодирование data:-URI, запись в Загрузки) — в
  * network/WebViewDownloads, общая с ui/plans/PlanViewScreen (просмотр уже сохранённого плана,
  * там та же кнопка «Скачать plan.json» встречается внутри локального HTML). Мост «Печать / PDF»
- * (WebPrintBridge) — там же, общий с PlanViewScreen.
+ * (WebPrintBridge) — там же, общий с PlanViewScreen. Пинч-зум (см. network/WebViewZoom) — тоже
+ * общий приём для всех WebView в приложении (калькуляторы, просмотр плана, отчёт аналитики).
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -81,6 +83,7 @@ fun ToolWebViewScreen(url: String) {
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
                         settings.cacheMode = WebSettings.LOAD_DEFAULT
+                        enableZoom()
                         // Хост берём из самого URL — это позволяет использовать тот же офлайн-кэш
                         // как для встроенных калькуляторов, так и для произвольных ссылок «по URL»
                         // на вкладке «Мои планы» (см. PlansScreen).

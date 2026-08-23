@@ -9,10 +9,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Состояние разблокировки вкладки «Экспорт» (единственное защищённое ПИН/биометрией место —
- * там хранятся токены Garmin/intervals.icu). [unlocked] сбрасывается в false при выходе с
- * вкладки «Экспорт» (см. DisposableEffect в MainActivity), поэтому при каждом её открытии
- * снова требуется ПИН/биометрия.
+ * Состояние разблокировки ВСЕГО приложения (защита включается, только если есть хотя бы один
+ * сохранённый аккаунт Garmin — см. GarminTokenStore.savedAccounts в MainActivity — там лежат
+ * токены Garmin/intervals.icu). [unlocked] сбрасывается в false, когда приложение уходит в фон
+ * (ON_STOP, см. RunstefApp в MainActivity), поэтому при каждом возврате в приложение снова
+ * требуется ПИН/биометрия.
  */
 class AuthViewModel(app: Application) : AndroidViewModel(app) {
 

@@ -37,11 +37,13 @@ import com.example.runstef.security.BiometricAuth
 private const val PIN_LENGTH = 4
 
 /**
- * Экран блокировки вкладки «Экспорт» — показывается при каждом её открытии, пока
- * [AuthViewModel.unlocked] не станет true (сбрасывается при выходе с вкладки, см. MainActivity).
- * Остальное приложение (калькуляторы, мои планы) не защищено — здесь лежат только
- * токены Garmin/intervals.icu. Если ПИН ещё не задан — ведёт по первичной настройке,
- * иначе просит ввести ПИН (и предлагает биометрию, если она включена и доступна на устройстве).
+ * Экран блокировки ВСЕГО приложения — показывается, пока [AuthViewModel.unlocked] не станет
+ * true; разблокировка сбрасывается, когда приложение уходит в фон (ON_STOP, см. MainActivity),
+ * так что при каждом возврате в приложение снова нужен ПИН/биометрия. Показывается только если
+ * есть хотя бы один сохранённый аккаунт Garmin — там лежат токены Garmin/intervals.icu; если
+ * аккаунтов ещё нет, приложение открывается сразу, без этого экрана.
+ * Если ПИН ещё не задан — ведёт по первичной настройке, иначе просит ввести ПИН
+ * (и предлагает биометрию, если она включена и доступна на устройстве).
  */
 @Composable
 fun LockScreen(activity: FragmentActivity, authViewModel: AuthViewModel) {
@@ -81,7 +83,7 @@ private fun PinSetupContent(onPinSet: (String) -> Unit) {
             style = MaterialTheme.typography.titleMedium
         )
         Text(
-            text = "Он потребуется при каждом открытии вкладки «Экспорт»",
+            text = "Он потребуется при каждом открытии приложения",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
