@@ -20,6 +20,7 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -83,6 +84,7 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
 
     val logLines by vm.log.collectAsState()
     val isRunning by vm.isRunning.collectAsState()
+    val progress by vm.progress.collectAsState()
     val lastActivityDate by vm.lastActivityDate.collectAsState()
     val firstActivityDate by vm.firstActivityDate.collectAsState()
     val activityCount by vm.activityCount.collectAsState()
@@ -97,11 +99,11 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
             vm.refreshLastActivityDate(account)
         }
     }
-    // При первом открытии вкладки (для уже знакомого аккаунта с непустой базой) — тихая
-    // догрузка свежих тренировок с (последняя дата в базе − 2 дня) по сегодня.
-    LaunchedEffect(account) {
-        if (account.isNotBlank()) vm.autoCatchUp(account)
-    }
+    // ОТКЛЮЧЕНО по явному запросу пользователя (2026-08-23: "и отключи автозагрузку данных -
+    // она работает некорректно") - раньше здесь была тихая авто-догрузка свежих тренировок при
+    // каждом открытии вкладки (vm.autoCatchUp(account)). Пользователь теперь явно нажимает
+    // "Импортировать тренировки" сам, когда нужно обновить данные.
+    // if (account.isNotBlank()) vm.autoCatchUp(account)
     // По умолчанию поле «С» — дата последней загруженной тренировки (см. doc выше). Реагируем на
     // сам lastActivityDate (а не только на первый рендер), т.к. после авто-обновления/импорта он
     // может смениться, а поле «С» ещё не трогали руками (startDate.isBlank()).
@@ -168,7 +170,7 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
             }
 
             Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                Button(
+                OutlinedButton(
                     enabled = !isRunning && account.isNotBlank() && startDate.isNotBlank(),
                     onClick = {
                         val s = runCatching { LocalDate.parse(startDate) }.getOrNull()
@@ -180,11 +182,14 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
                     modifier = Modifier.weight(1f)
                 ) { Text("Импортировать тренировки") }
             }
-            OutlinedButton(
-                enabled = lastActivityDate != null,
+            // ГЛАВНОЕ действие вкладки - построение отчёта (по запросу пользователя 2026-08-23:
+            // "так же выделена кнопка 'импортировать тренировки', хотя главная - 'построить
+            // отчет'") - обычная закрашенная Button (акцентная), импорт выше - OutlinedButton.
+            Button(
+                enabled = lastActivityDate != null && !isRunning,
                 onClick = { vm.buildReport(account.trim()) },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-            ) { Text("Собрать и открыть отчёт") }
+            ) { Text("Построить отчёт") }
 
             var showImportConfirm by remember { mutableStateOf<android.net.Uri?>(null) }
             val importDbLauncher = rememberLauncherForActivityResult(
@@ -217,7 +222,27 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
             Text("Лог", style = MaterialTheme.typography.titleMedium)
-            if (isRunning) CircularProgressIndicator(modifier = Modifier.padding(8.dp))
+            if (isRunning) {
+                val pct = progress
+                if (pct != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                    ) {
+                        LinearProgressIndicator(
+                            progress = { pct / 100f },
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            "$pct%",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    }
+                } else {
+                    CircularProgressIndicator(modifier = Modifier.padding(8.dp))
+                }
+            }
             LazyColumn(modifier = Modifier.fillMaxWidth().height(220.dp)) {
                 items(logLines) { line -> Text(line, style = MaterialTheme.typography.bodySmall) }
             }

@@ -7,9 +7,16 @@ import android.database.sqlite.SQLiteOpenHelper
 import java.io.File
 import java.time.LocalDate
 
+/**
+ * activities — ПОЛНАЯ схема 1:1 с десктопной garmin_activities_export.py / garmin_running_ystef.db
+ * (см. project memory, часть 27/28). Поля, которые apk пока не заполняет сетевым импортом,
+ * присутствуют в схеме и в data-классе как null — это осознанно (полная схема нужна для
+ * совместимости с "Импорт БД из файла" реального десктопного .db и для будущего дозаполнения).
+ */
 data class ActivityRow(
     val activityId: Long,
     val date: String,
+    val startTime: String? = null,
     val name: String,
     val sport: String?,
     val durationS: Double?,
@@ -17,25 +24,79 @@ data class ActivityRow(
     val avgHr: Int?,
     val maxHr: Int?,
     val avgPaceSPerKm: Double?,
+    val lapSource: String? = null,
     val typeGuess: String?,
-    // Порт avg_grade_adjusted_pace_s_per_km (GAP) — темп с поправкой на уклон, только для
-    // уличных пробежек с заметным набором высоты (см. GarminActivitiesApi.fetchGradeAdjustedPace
-    // ByLap/OUTDOOR_RUN_TYPE_KEYS). null — либо не бег/дорожка, либо набор высоты незначительный,
-    // либо Гармин не отдал поточные данные для этой тренировки.
+    val typeReason: String? = null,
+    val elevationGainM: Double? = null,
+    val elevationLossM: Double? = null,
+    val avgTemperatureC: Double? = null,
+    val avgCadenceSpm: Double? = null,
+    val avgStrideLengthM: Double? = null,
+    val calories: Double? = null,
+    val aerobicTrainingEffect: Double? = null,
+    val anaerobicTrainingEffect: Double? = null,
+    val manualActivity: Boolean? = null,
+    val elevationCorrected: Boolean? = null,
+    val waterEstimatedMl: Double? = null,
+    val impactLoad: Double? = null,
+    val activityTrainingLoad: Double? = null,
+    val differenceBodyBattery: Int? = null,
+    val moderateIntensityMin: Double? = null,
+    val vigorousIntensityMin: Double? = null,
+    val hrTimeInZone1: Double? = null,
+    val hrTimeInZone2: Double? = null,
+    val hrTimeInZone3: Double? = null,
+    val hrTimeInZone4: Double? = null,
+    val hrTimeInZone5: Double? = null,
+    val cadenceDriftPct: Double? = null,
+    val gctDriftPct: Double? = null,
+    val verticalOscDriftPct: Double? = null,
     val avgGapSPerKm: Double? = null
 )
 
+/**
+ * wellness — ПОЛНАЯ схема 1:1 с десктопом. ВАЖНО: ключевая колонка называется `rhr`
+ * (НЕ resting_hr, как было в старой упрощённой схеме apk) — переименована при миграции v6,
+ * чтобы "Импорт БД из файла" реального десктопного .db работал без ошибок "no such column".
+ */
 data class WellnessRow(
     val date: String,
-    val restingHr: Int?,
+    val sleepScore: Int?,
+    val sleepDurationS: Double? = null,
+    val sleepDeepS: Double? = null,
+    val sleepLightS: Double? = null,
+    val sleepRemS: Double? = null,
+    val sleepAwakeS: Double? = null,
+    val sleepAvgResp: Double? = null,
     val hrvLastNightAvg: Double?,
-    val sleepScore: Int?
+    val hrvWeeklyAvg: Double? = null,
+    val hrvStatus: String? = null,
+    val rhr: Int?,
+    val bodyBatteryMin: Int? = null,
+    val bodyBatteryMax: Int? = null,
+    val bodyBatteryCharged: Int? = null,
+    val bodyBatteryDrained: Int? = null,
+    val stressAvg: Int? = null,
+    val stressMax: Int? = null,
+    val trainingReadinessScore: Int? = null,
+    val trainingReadinessLevel: String? = null,
+    val steps: Int? = null,
+    val activeCalories: Int? = null,
+    val avgSleepStress: Double? = null,
+    val sleepSpo2Avg: Double? = null,
+    val sleepSpo2Min: Int? = null,
+    val sleepRhr: Int? = null,
+    val skinTempDeviationC: Double? = null,
+    val sleepTrainingFeedback: String? = null,
+    val floorsAscended: Double? = null,
+    val stressRestS: Double? = null,
+    val stressActivityS: Double? = null,
+    val stressUncategorizedS: Double? = null,
+    val stressLowS: Double? = null,
+    val stressMediumS: Double? = null,
+    val stressHighS: Double? = null
 )
 
-/** Один лап/сплит тренировки — упрощённый порт intervals из garmin_activities_export.py
- * (без беговой динамики/GCT/каденса — только то, что нужно классификатору classify(), см.
- * GarminActivitiesApi.classifyByLaps). lapType — сырое значение Garmin (ACTIVE/REST/WARMUP/...
- * из поля "type"/"intensityType"), null если тип не пришёл (обычные авто-лапы по километру). */
 /** Кросс-тренировка (вело/лыжи/плавание/силовая) — порт cross_activities из
  * garmin_activities_export.py. Только суммарная нагрузка (не по осям, как беговые) — нужна
  * для контекста системной усталости (ACWR/HRV), не для беговых зон/темпа. sport — группа
@@ -57,6 +118,8 @@ data class LactateThresholdRow(
     val thresholdPaceSPerKm: Double?
 )
 
+/** Лап/сплит тренировки — ПОЛНАЯ схема 1:1 с десктопной intervals (беговая динамика включена:
+ * каденс/GCT/вертикальные колебания/соотношение/длина шага/дыхание/compliance score). */
 data class IntervalRow(
     val idx: Int,
     val lapType: String?,
@@ -65,35 +128,33 @@ data class IntervalRow(
     val avgHr: Int?,
     val maxHr: Int?,
     val avgPaceSPerKm: Double?,
+    val avgCadenceSpm: Double? = null,
+    val groundContactTimeMs: Double? = null,
+    val verticalOscillationMm: Double? = null,
+    val verticalRatio: Double? = null,
+    val strideLengthMm: Double? = null,
+    val avgRespirationRate: Double? = null,
+    val workoutComplianceScore: Int? = null,
     val avgGapSPerKm: Double? = null
 )
 
 /**
- * Локальная база аналитики Garmin — упрощённый Kotlin-аналог таблиц activities/wellness из
- * garmin_activities_export.py (та же роль: локальный кэш выгруженных тренировок и показателей
- * самочувствия, из которого строится отчёт). База — ОДНА НА АККАУНТ Garmin (см.
- * dbFileForAccount) — файлы лежат в filesDir/analytics/, рядом с токенами (files/garth/).
- *
- * Сознательно упрощено относительно десктопной версии (garmin_activities_export.py +
- * build_report.py): нет лапов/интервалов, кросс-тренировок, ПАНО-истории и десятка
- * wellness-конфаундов — только то, что нужно для отчёта в AnalyticsReportBuilder (объём,
- * темп, пульс, RHR/HRV, простая классификация лёгкая/качественная/длинная). Полный анализ
- * по-прежнему делает build_report.py на компьютере (см. plan_uploader_gui.py — вкладка
- * «Аналитика» там строит тот самый подробный HTML).
+ * Локальная база аналитики Garmin — Kotlin-аналог таблиц activities/wellness/intervals/
+ * cross_activities/lactate_threshold из garmin_activities_export.py. С v6 схема ПОЛНОСТЬЮ
+ * приведена к десктопной (1:1 по колонкам/именам) по прямому требованию пользователя ("исправь
+ * структуру базы и приведи к десктопной" / "переписывай все к десктопной версии, никакой
+ * обратной совместимости не надо") — база ОДНА НА АККАУНТ Garmin (см. dbFileForAccount).
  */
 class AnalyticsDb private constructor(context: Context, dbFile: File) :
     SQLiteOpenHelper(context, dbFile.absolutePath, null, DB_VERSION) {
 
     companion object {
-        // v2: добавлена таблица intervals (лапы/сплиты — нужны classify() для честной
-        // классификации тренировок, см. GarminActivitiesApi.classifyByLaps).
-        // v3: добавлена таблица lactate_threshold (история ПАНО от Garmin/Firstbeat) — нужна
-        // для настоящих пульсовых зон (buildZonesForClassifier), а не приближения Карвонена.
-        // v4: добавлена таблица cross_activities (вело/лыжи/плавание/силовые) — контекст
-        // системной нагрузки, не беговые оси.
-        // v5: добавлена колонка avg_grade_adjusted_pace_s_per_km в activities и intervals —
-        // GAP (grade-adjusted pace), порт apply_grade_adjustment()/fetch_grade_adjusted_pace_by_lap().
-        private const val DB_VERSION = 5
+        // v2: intervals. v3: lactate_threshold. v4: cross_activities.
+        // v5: avg_grade_adjusted_pace_s_per_km в activities/intervals.
+        // v6: ПОЛНЫЙ репаритет схемы с десктопом (activities/intervals/wellness) — добавлены все
+        // confound-колонки, wellness.resting_hr переименован в rhr (пересоздание таблицы, т.к.
+        // ALTER TABLE RENAME COLUMN ненадёжен на minSdk=28).
+        const val DB_VERSION = 6
 
         fun dirFor(context: Context): File = File(context.filesDir, "analytics").apply { mkdirs() }
 
@@ -104,11 +165,17 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
 
         fun open(context: Context, account: String): AnalyticsDb =
             AnalyticsDb(context, dbFileForAccount(context, account))
-    }
 
-    override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL(
-            """
+        /** Открывает произвольный файл БД через тот же SQLiteOpenHelper, что и обычные базы
+         * аккаунтов -- используется ТОЛЬКО для проверки импортируемого извне файла ВО ВРЕМЕННОМ
+         * расположении, до того как он заменит рабочую базу (см. AnalyticsViewModel.
+         * importDbFromUri). Если файл содержит таблицы устаревшей/чужой схемы без правильно
+         * выставленного user_version, здесь и вылетит то же SQLiteException ("table ... already
+         * exists" и т.п.), что раньше вылетало уже ПОСЛЕ замены рабочей базы. */
+        fun openForImportCheck(context: Context, file: File): AnalyticsDb =
+            AnalyticsDb(context, file)
+
+        private const val ACTIVITIES_SCHEMA = """
             CREATE TABLE activities (
                 activity_id INTEGER PRIMARY KEY,
                 date TEXT NOT NULL,
@@ -120,26 +187,39 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
                 avg_hr INTEGER,
                 max_hr INTEGER,
                 avg_pace_s_per_km REAL,
+                lap_source TEXT,
                 type_guess TEXT,
+                type_reason TEXT,
+                elevation_gain_m REAL,
+                elevation_loss_m REAL,
+                avg_temperature_c REAL,
+                avg_cadence_spm REAL,
+                avg_stride_length_m REAL,
+                calories REAL,
+                aerobic_training_effect REAL,
+                anaerobic_training_effect REAL,
+                manual_activity INTEGER,
+                elevation_corrected INTEGER,
+                water_estimated_ml REAL,
+                impact_load REAL,
+                activity_training_load REAL,
+                difference_body_battery INTEGER,
+                moderate_intensity_min REAL,
+                vigorous_intensity_min REAL,
+                hr_time_in_zone_1 REAL,
+                hr_time_in_zone_2 REAL,
+                hr_time_in_zone_3 REAL,
+                hr_time_in_zone_4 REAL,
+                hr_time_in_zone_5 REAL,
+                cadence_drift_pct REAL,
+                gct_drift_pct REAL,
+                vertical_osc_drift_pct REAL,
                 avg_grade_adjusted_pace_s_per_km REAL,
                 exported_at TEXT
             )
-            """.trimIndent()
-        )
-        db.execSQL("CREATE INDEX idx_activities_date ON activities(date)")
-        db.execSQL(
-            """
-            CREATE TABLE wellness (
-                date TEXT PRIMARY KEY,
-                resting_hr INTEGER,
-                hrv_last_night_avg REAL,
-                sleep_score INTEGER,
-                exported_at TEXT
-            )
-            """.trimIndent()
-        )
-        db.execSQL(
-            """
+        """
+
+        private const val INTERVALS_SCHEMA = """
             CREATE TABLE intervals (
                 activity_id INTEGER NOT NULL,
                 idx INTEGER NOT NULL,
@@ -149,11 +229,65 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
                 avg_hr INTEGER,
                 max_hr INTEGER,
                 avg_pace_s_per_km REAL,
+                avg_cadence_spm REAL,
+                ground_contact_time_ms REAL,
+                vertical_oscillation_mm REAL,
+                vertical_ratio REAL,
+                stride_length_mm REAL,
+                avg_respiration_rate REAL,
+                workout_compliance_score INTEGER,
                 avg_grade_adjusted_pace_s_per_km REAL,
                 PRIMARY KEY (activity_id, idx)
             )
-            """.trimIndent()
-        )
+        """
+
+        private const val WELLNESS_SCHEMA = """
+            CREATE TABLE wellness (
+                date TEXT PRIMARY KEY,
+                sleep_score INTEGER,
+                sleep_duration_s REAL,
+                sleep_deep_s REAL,
+                sleep_light_s REAL,
+                sleep_rem_s REAL,
+                sleep_awake_s REAL,
+                sleep_avg_resp REAL,
+                hrv_last_night_avg REAL,
+                hrv_weekly_avg REAL,
+                hrv_status TEXT,
+                rhr INTEGER,
+                body_battery_min INTEGER,
+                body_battery_max INTEGER,
+                body_battery_charged INTEGER,
+                body_battery_drained INTEGER,
+                stress_avg INTEGER,
+                stress_max INTEGER,
+                training_readiness_score INTEGER,
+                training_readiness_level TEXT,
+                steps INTEGER,
+                active_calories INTEGER,
+                avg_sleep_stress REAL,
+                sleep_spo2_avg REAL,
+                sleep_spo2_min INTEGER,
+                sleep_rhr INTEGER,
+                skin_temp_deviation_c REAL,
+                sleep_training_feedback TEXT,
+                floors_ascended REAL,
+                stress_rest_s REAL,
+                stress_activity_s REAL,
+                stress_uncategorized_s REAL,
+                stress_low_s REAL,
+                stress_medium_s REAL,
+                stress_high_s REAL,
+                exported_at TEXT
+            )
+        """
+    }
+
+    override fun onCreate(db: SQLiteDatabase) {
+        db.execSQL(ACTIVITIES_SCHEMA.trimIndent())
+        db.execSQL("CREATE INDEX idx_activities_date ON activities(date)")
+        db.execSQL(WELLNESS_SCHEMA.trimIndent())
+        db.execSQL(INTERVALS_SCHEMA.trimIndent())
         db.execSQL("CREATE INDEX idx_intervals_activity ON intervals(activity_id)")
         db.execSQL(
             """
@@ -237,10 +371,40 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_cross_activities_date ON cross_activities(date)")
         }
         if (oldVersion < 5) {
-            // ALTER TABLE ADD COLUMN — SQLite позволяет добавлять NULLABLE-колонку без пересоздания
-            // таблицы; уже существующие строки получат NULL (пересчитается при следующем импорте).
             runCatching { db.execSQL("ALTER TABLE activities ADD COLUMN avg_grade_adjusted_pace_s_per_km REAL") }
             runCatching { db.execSQL("ALTER TABLE intervals ADD COLUMN avg_grade_adjusted_pace_s_per_km REAL") }
+        }
+        if (oldVersion < 6) {
+            val newActivityCols = listOf(
+                "lap_source TEXT", "type_reason TEXT", "elevation_gain_m REAL", "elevation_loss_m REAL",
+                "avg_temperature_c REAL", "avg_cadence_spm REAL", "avg_stride_length_m REAL", "calories REAL",
+                "aerobic_training_effect REAL", "anaerobic_training_effect REAL", "manual_activity INTEGER",
+                "elevation_corrected INTEGER", "water_estimated_ml REAL", "impact_load REAL",
+                "activity_training_load REAL", "difference_body_battery INTEGER", "moderate_intensity_min REAL",
+                "vigorous_intensity_min REAL", "hr_time_in_zone_1 REAL", "hr_time_in_zone_2 REAL",
+                "hr_time_in_zone_3 REAL", "hr_time_in_zone_4 REAL", "hr_time_in_zone_5 REAL",
+                "cadence_drift_pct REAL", "gct_drift_pct REAL", "vertical_osc_drift_pct REAL"
+            )
+            for (col in newActivityCols) {
+                runCatching { db.execSQL("ALTER TABLE activities ADD COLUMN $col") }
+            }
+            val newIntervalCols = listOf(
+                "avg_cadence_spm REAL", "ground_contact_time_ms REAL", "vertical_oscillation_mm REAL",
+                "vertical_ratio REAL", "stride_length_mm REAL", "avg_respiration_rate REAL",
+                "workout_compliance_score INTEGER"
+            )
+            for (col in newIntervalCols) {
+                runCatching { db.execSQL("ALTER TABLE intervals ADD COLUMN $col") }
+            }
+            db.execSQL("ALTER TABLE wellness RENAME TO wellness_old_v6")
+            db.execSQL(WELLNESS_SCHEMA.trimIndent())
+            db.execSQL(
+                """
+                INSERT INTO wellness (date, sleep_score, hrv_last_night_avg, rhr, exported_at)
+                SELECT date, sleep_score, hrv_last_night_avg, resting_hr, exported_at FROM wellness_old_v6
+                """.trimIndent()
+            )
+            db.execSQL("DROP TABLE wellness_old_v6")
         }
     }
 
@@ -248,6 +412,7 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         val cv = ContentValues().apply {
             put("activity_id", a.activityId)
             put("date", a.date)
+            put("start_time", a.startTime)
             put("name", a.name)
             put("sport", a.sport)
             put("duration_s", a.durationS)
@@ -255,7 +420,33 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
             a.avgHr?.let { put("avg_hr", it) } ?: putNull("avg_hr")
             a.maxHr?.let { put("max_hr", it) } ?: putNull("max_hr")
             a.avgPaceSPerKm?.let { put("avg_pace_s_per_km", it) } ?: putNull("avg_pace_s_per_km")
+            put("lap_source", a.lapSource)
             put("type_guess", a.typeGuess)
+            put("type_reason", a.typeReason)
+            a.elevationGainM?.let { put("elevation_gain_m", it) } ?: putNull("elevation_gain_m")
+            a.elevationLossM?.let { put("elevation_loss_m", it) } ?: putNull("elevation_loss_m")
+            a.avgTemperatureC?.let { put("avg_temperature_c", it) } ?: putNull("avg_temperature_c")
+            a.avgCadenceSpm?.let { put("avg_cadence_spm", it) } ?: putNull("avg_cadence_spm")
+            a.avgStrideLengthM?.let { put("avg_stride_length_m", it) } ?: putNull("avg_stride_length_m")
+            a.calories?.let { put("calories", it) } ?: putNull("calories")
+            a.aerobicTrainingEffect?.let { put("aerobic_training_effect", it) } ?: putNull("aerobic_training_effect")
+            a.anaerobicTrainingEffect?.let { put("anaerobic_training_effect", it) } ?: putNull("anaerobic_training_effect")
+            a.manualActivity?.let { put("manual_activity", if (it) 1 else 0) } ?: putNull("manual_activity")
+            a.elevationCorrected?.let { put("elevation_corrected", if (it) 1 else 0) } ?: putNull("elevation_corrected")
+            a.waterEstimatedMl?.let { put("water_estimated_ml", it) } ?: putNull("water_estimated_ml")
+            a.impactLoad?.let { put("impact_load", it) } ?: putNull("impact_load")
+            a.activityTrainingLoad?.let { put("activity_training_load", it) } ?: putNull("activity_training_load")
+            a.differenceBodyBattery?.let { put("difference_body_battery", it) } ?: putNull("difference_body_battery")
+            a.moderateIntensityMin?.let { put("moderate_intensity_min", it) } ?: putNull("moderate_intensity_min")
+            a.vigorousIntensityMin?.let { put("vigorous_intensity_min", it) } ?: putNull("vigorous_intensity_min")
+            a.hrTimeInZone1?.let { put("hr_time_in_zone_1", it) } ?: putNull("hr_time_in_zone_1")
+            a.hrTimeInZone2?.let { put("hr_time_in_zone_2", it) } ?: putNull("hr_time_in_zone_2")
+            a.hrTimeInZone3?.let { put("hr_time_in_zone_3", it) } ?: putNull("hr_time_in_zone_3")
+            a.hrTimeInZone4?.let { put("hr_time_in_zone_4", it) } ?: putNull("hr_time_in_zone_4")
+            a.hrTimeInZone5?.let { put("hr_time_in_zone_5", it) } ?: putNull("hr_time_in_zone_5")
+            a.cadenceDriftPct?.let { put("cadence_drift_pct", it) } ?: putNull("cadence_drift_pct")
+            a.gctDriftPct?.let { put("gct_drift_pct", it) } ?: putNull("gct_drift_pct")
+            a.verticalOscDriftPct?.let { put("vertical_osc_drift_pct", it) } ?: putNull("vertical_osc_drift_pct")
             a.avgGapSPerKm?.let { put("avg_grade_adjusted_pace_s_per_km", it) } ?: putNull("avg_grade_adjusted_pace_s_per_km")
             put("exported_at", exportedAtIso)
         }
@@ -265,9 +456,40 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
     fun upsertWellness(w: WellnessRow, exportedAtIso: String) {
         val cv = ContentValues().apply {
             put("date", w.date)
-            w.restingHr?.let { put("resting_hr", it) } ?: putNull("resting_hr")
-            w.hrvLastNightAvg?.let { put("hrv_last_night_avg", it) } ?: putNull("hrv_last_night_avg")
             w.sleepScore?.let { put("sleep_score", it) } ?: putNull("sleep_score")
+            w.sleepDurationS?.let { put("sleep_duration_s", it) } ?: putNull("sleep_duration_s")
+            w.sleepDeepS?.let { put("sleep_deep_s", it) } ?: putNull("sleep_deep_s")
+            w.sleepLightS?.let { put("sleep_light_s", it) } ?: putNull("sleep_light_s")
+            w.sleepRemS?.let { put("sleep_rem_s", it) } ?: putNull("sleep_rem_s")
+            w.sleepAwakeS?.let { put("sleep_awake_s", it) } ?: putNull("sleep_awake_s")
+            w.sleepAvgResp?.let { put("sleep_avg_resp", it) } ?: putNull("sleep_avg_resp")
+            w.hrvLastNightAvg?.let { put("hrv_last_night_avg", it) } ?: putNull("hrv_last_night_avg")
+            w.hrvWeeklyAvg?.let { put("hrv_weekly_avg", it) } ?: putNull("hrv_weekly_avg")
+            put("hrv_status", w.hrvStatus)
+            w.rhr?.let { put("rhr", it) } ?: putNull("rhr")
+            w.bodyBatteryMin?.let { put("body_battery_min", it) } ?: putNull("body_battery_min")
+            w.bodyBatteryMax?.let { put("body_battery_max", it) } ?: putNull("body_battery_max")
+            w.bodyBatteryCharged?.let { put("body_battery_charged", it) } ?: putNull("body_battery_charged")
+            w.bodyBatteryDrained?.let { put("body_battery_drained", it) } ?: putNull("body_battery_drained")
+            w.stressAvg?.let { put("stress_avg", it) } ?: putNull("stress_avg")
+            w.stressMax?.let { put("stress_max", it) } ?: putNull("stress_max")
+            w.trainingReadinessScore?.let { put("training_readiness_score", it) } ?: putNull("training_readiness_score")
+            put("training_readiness_level", w.trainingReadinessLevel)
+            w.steps?.let { put("steps", it) } ?: putNull("steps")
+            w.activeCalories?.let { put("active_calories", it) } ?: putNull("active_calories")
+            w.avgSleepStress?.let { put("avg_sleep_stress", it) } ?: putNull("avg_sleep_stress")
+            w.sleepSpo2Avg?.let { put("sleep_spo2_avg", it) } ?: putNull("sleep_spo2_avg")
+            w.sleepSpo2Min?.let { put("sleep_spo2_min", it) } ?: putNull("sleep_spo2_min")
+            w.sleepRhr?.let { put("sleep_rhr", it) } ?: putNull("sleep_rhr")
+            w.skinTempDeviationC?.let { put("skin_temp_deviation_c", it) } ?: putNull("skin_temp_deviation_c")
+            put("sleep_training_feedback", w.sleepTrainingFeedback)
+            w.floorsAscended?.let { put("floors_ascended", it) } ?: putNull("floors_ascended")
+            w.stressRestS?.let { put("stress_rest_s", it) } ?: putNull("stress_rest_s")
+            w.stressActivityS?.let { put("stress_activity_s", it) } ?: putNull("stress_activity_s")
+            w.stressUncategorizedS?.let { put("stress_uncategorized_s", it) } ?: putNull("stress_uncategorized_s")
+            w.stressLowS?.let { put("stress_low_s", it) } ?: putNull("stress_low_s")
+            w.stressMediumS?.let { put("stress_medium_s", it) } ?: putNull("stress_medium_s")
+            w.stressHighS?.let { put("stress_high_s", it) } ?: putNull("stress_high_s")
             put("exported_at", exportedAtIso)
         }
         writableDatabase.insertWithOnConflict("wellness", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
@@ -291,12 +513,12 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         }
     }
 
-    /** Активности от [sinceDate] (включительно, ISO ГГГГ-ММ-ДД) до сегодня, по возрастанию даты. */
     fun activitiesSince(sinceDate: String): List<ActivityRow> {
         val rows = mutableListOf<ActivityRow>()
         readableDatabase.rawQuery(
             """SELECT activity_id, date, name, sport, duration_s, distance_m, avg_hr, max_hr,
-                      avg_pace_s_per_km, type_guess, avg_grade_adjusted_pace_s_per_km
+                      avg_pace_s_per_km, type_guess, avg_grade_adjusted_pace_s_per_km,
+                      cadence_drift_pct, gct_drift_pct, vertical_osc_drift_pct, activity_training_load
                FROM activities WHERE date >= ? ORDER BY date ASC""",
             arrayOf(sinceDate)
         ).use { c ->
@@ -313,7 +535,11 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
                         maxHr = if (c.isNull(7)) null else c.getInt(7),
                         avgPaceSPerKm = if (c.isNull(8)) null else c.getDouble(8),
                         typeGuess = c.getString(9),
-                        avgGapSPerKm = if (c.isNull(10)) null else c.getDouble(10)
+                        avgGapSPerKm = if (c.isNull(10)) null else c.getDouble(10),
+                        cadenceDriftPct = if (c.isNull(11)) null else c.getDouble(11),
+                        gctDriftPct = if (c.isNull(12)) null else c.getDouble(12),
+                        verticalOscDriftPct = if (c.isNull(13)) null else c.getDouble(13),
+                        activityTrainingLoad = if (c.isNull(14)) null else c.getDouble(14)
                     )
                 )
             }
@@ -332,7 +558,9 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
     fun wellnessSince(sinceDate: String): List<WellnessRow> {
         val rows = mutableListOf<WellnessRow>()
         readableDatabase.rawQuery(
-            """SELECT date, resting_hr, hrv_last_night_avg, sleep_score
+            """SELECT date, rhr, hrv_last_night_avg, sleep_score, body_battery_min, body_battery_max,
+                      body_battery_charged, body_battery_drained, stress_avg, stress_max,
+                      training_readiness_score, training_readiness_level
                FROM wellness WHERE date >= ? ORDER BY date ASC""",
             arrayOf(sinceDate)
         ).use { c ->
@@ -340,9 +568,17 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
                 rows.add(
                     WellnessRow(
                         date = c.getString(0),
-                        restingHr = if (c.isNull(1)) null else c.getInt(1),
+                        rhr = if (c.isNull(1)) null else c.getInt(1),
                         hrvLastNightAvg = if (c.isNull(2)) null else c.getDouble(2),
-                        sleepScore = if (c.isNull(3)) null else c.getInt(3)
+                        sleepScore = if (c.isNull(3)) null else c.getInt(3),
+                        bodyBatteryMin = if (c.isNull(4)) null else c.getInt(4),
+                        bodyBatteryMax = if (c.isNull(5)) null else c.getInt(5),
+                        bodyBatteryCharged = if (c.isNull(6)) null else c.getInt(6),
+                        bodyBatteryDrained = if (c.isNull(7)) null else c.getInt(7),
+                        stressAvg = if (c.isNull(8)) null else c.getInt(8),
+                        stressMax = if (c.isNull(9)) null else c.getInt(9),
+                        trainingReadinessScore = if (c.isNull(10)) null else c.getInt(10),
+                        trainingReadinessLevel = c.getString(11)
                     )
                 )
             }
@@ -350,9 +586,6 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         return rows
     }
 
-    /** Заменяет лапы тренировки целиком (как upsert_activity в garmin_activities_export.py:
-     * DELETE WHERE activity_id=? затем вставка заново) — лапы не апдейтятся точечно, тренировка
-     * при повторной выгрузке могла быть переразмечена Гарминым (typed/plain), проще пересобрать. */
     fun replaceIntervals(activityId: Long, laps: List<IntervalRow>) {
         val db = writableDatabase
         db.delete("intervals", "activity_id=?", arrayOf(activityId.toString()))
@@ -366,18 +599,22 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
                 l.avgHr?.let { put("avg_hr", it) } ?: putNull("avg_hr")
                 l.maxHr?.let { put("max_hr", it) } ?: putNull("max_hr")
                 l.avgPaceSPerKm?.let { put("avg_pace_s_per_km", it) } ?: putNull("avg_pace_s_per_km")
+                l.avgCadenceSpm?.let { put("avg_cadence_spm", it) } ?: putNull("avg_cadence_spm")
+                l.groundContactTimeMs?.let { put("ground_contact_time_ms", it) } ?: putNull("ground_contact_time_ms")
+                l.verticalOscillationMm?.let { put("vertical_oscillation_mm", it) } ?: putNull("vertical_oscillation_mm")
+                l.verticalRatio?.let { put("vertical_ratio", it) } ?: putNull("vertical_ratio")
+                l.strideLengthMm?.let { put("stride_length_mm", it) } ?: putNull("stride_length_mm")
+                l.avgRespirationRate?.let { put("avg_respiration_rate", it) } ?: putNull("avg_respiration_rate")
+                l.workoutComplianceScore?.let { put("workout_compliance_score", it) } ?: putNull("workout_compliance_score")
                 l.avgGapSPerKm?.let { put("avg_grade_adjusted_pace_s_per_km", it) } ?: putNull("avg_grade_adjusted_pace_s_per_km")
             }
             db.insertWithOnConflict("intervals", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
         }
     }
 
-    /** Средний resting_hr за последние 90 дней (для estimateHrZones в GarminActivitiesApi —
-     * настоящий RHR из wellness точнее, чем грубая оценка по avgHr тренировок). null, если
-     * записей ещё нет вообще (самый первый импорт без wellness). */
     fun recentRestingHr(sinceDate: String): Int? {
         readableDatabase.rawQuery(
-            "SELECT AVG(resting_hr) FROM wellness WHERE date >= ? AND resting_hr IS NOT NULL",
+            "SELECT AVG(rhr) FROM wellness WHERE date >= ? AND rhr IS NOT NULL",
             arrayOf(sinceDate)
         ).use { c ->
             if (c.moveToFirst() && !c.isNull(0)) return Math.round(c.getDouble(0)).toInt()
@@ -385,8 +622,6 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         return null
     }
 
-    /** Записывает/обновляет одну дату истории ПАНО (см. GarminActivitiesApi.fetchLactateThresholdRange —
-     * порт fetch_lactate_threshold_range() из garmin_activities_export.py). */
     fun upsertLactateThreshold(date: String, thresholdHr: Int?, thresholdPaceSPerKm: Double?, source: String?, exportedAtIso: String) {
         val cv = ContentValues().apply {
             put("date", date)
@@ -398,13 +633,6 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         writableDatabase.insertWithOnConflict("lactate_threshold", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
-    /** Порт _pano_from_db() из garmin_activities_export.py — среднее threshold_hr за последние
-     * [recentDays] от последней записи в БД (не от "сегодня" — от максимальной даты в самой
-     * таблице, чтобы работать одинаково и для свежей, и для давно не обновлявшейся истории).
-     * null, если истории ПАНО в БД ещё нет вообще. */
-    /** Все записи истории ПАНО от [sinceDate], где известны И threshold_hr, И
-     * threshold_pace_s_per_km — нужны для VO2max-прокси (garminVo2maxProxy в VdotAnalysis.kt/
-     * VolumeEfResponse.kt — см. вызывающий код), которому нужны обе величины разом. */
     fun lactateThresholdSince(sinceDate: String): List<LactateThresholdRow> {
         val rows = mutableListOf<LactateThresholdRow>()
         readableDatabase.rawQuery(
@@ -438,12 +666,10 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         return Math.round(use.average()).toInt()
     }
 
-    /** Порт _rest_hr_from_db() — среднее wellness.resting_hr за последние [recentDays] от
-     * последней записи с известным rhr. Фолбэк 50.0, если данных нет вообще (как в десктопе). */
     fun restHrFromDb(recentDays: Int = 90): Double {
         val rows = mutableListOf<Pair<String, Int>>()
         readableDatabase.rawQuery(
-            "SELECT date, resting_hr FROM wellness WHERE resting_hr IS NOT NULL", null
+            "SELECT date, rhr FROM wellness WHERE rhr IS NOT NULL", null
         ).use { c -> while (c.moveToNext()) rows.add(c.getString(0) to c.getInt(1)) }
         if (rows.isEmpty()) return 50.0
         val lastDate = rows.maxOf { LocalDate.parse(it.first.take(10)) }
@@ -453,9 +679,6 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         return use.average()
     }
 
-    /** Порт _max_hr_from_db() — max(max_hr) среди тренировок без выброса (разрыв max_hr-avg_hr
-     * не больше [maxSpread], сам max_hr не выше [absCeiling] — защита от одиночных скачков
-     * оптического пульсометра). [fallbackMaxHr] — если чистых строк нет; иначе 195. */
     fun maxHrFromDb(fallbackMaxHr: Int? = null, absCeiling: Int = 215, maxSpread: Int = 60): Int {
         val clean = mutableListOf<Int>()
         readableDatabase.rawQuery(
@@ -474,7 +697,9 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         val rows = mutableListOf<IntervalRow>()
         readableDatabase.rawQuery(
             """SELECT idx, lap_type, duration_s, distance_m, avg_hr, max_hr, avg_pace_s_per_km,
-                      avg_grade_adjusted_pace_s_per_km
+                      avg_grade_adjusted_pace_s_per_km, avg_cadence_spm, ground_contact_time_ms,
+                      vertical_oscillation_mm, vertical_ratio, stride_length_mm, avg_respiration_rate,
+                      workout_compliance_score
                FROM intervals WHERE activity_id=? ORDER BY idx ASC""",
             arrayOf(activityId.toString())
         ).use { c ->
@@ -488,7 +713,14 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
                         avgHr = if (c.isNull(4)) null else c.getInt(4),
                         maxHr = if (c.isNull(5)) null else c.getInt(5),
                         avgPaceSPerKm = if (c.isNull(6)) null else c.getDouble(6),
-                        avgGapSPerKm = if (c.isNull(7)) null else c.getDouble(7)
+                        avgGapSPerKm = if (c.isNull(7)) null else c.getDouble(7),
+                        avgCadenceSpm = if (c.isNull(8)) null else c.getDouble(8),
+                        groundContactTimeMs = if (c.isNull(9)) null else c.getDouble(9),
+                        verticalOscillationMm = if (c.isNull(10)) null else c.getDouble(10),
+                        verticalRatio = if (c.isNull(11)) null else c.getDouble(11),
+                        strideLengthMm = if (c.isNull(12)) null else c.getDouble(12),
+                        avgRespirationRate = if (c.isNull(13)) null else c.getDouble(13),
+                        workoutComplianceScore = if (c.isNull(14)) null else c.getInt(14)
                     )
                 )
             }

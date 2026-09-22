@@ -12,9 +12,15 @@
   - garmin_activities_export.py   (garmin_activities_export.export — выгрузка активностей в БД)
   - build_report.py               (build_report.main — сборка HTML-отчёта по БД)
 
-Аккаунт Garmin — ОБЩИЙ для вкладки "Garmin Connect" (загрузка плана) и вкладки "Аналитика"
-(выгрузка тренировок): выбирается один раз в блоке "Аккаунт Garmin" вверху окна, токен
-хранится в ~/.garth/<логин>, как и раньше.
+Верхний уровень окна разделён на две вкладки:
+  - "Загрузка плана" — единый выбор аккаунта (Garmin Connect ИЛИ intervals.icu, подписан как
+    "<сервис> - <имя аккаунта>") + под-вкладки с настройками загрузки для каждого сервиса.
+  - "Аналитика" — выгрузка тренировок Garmin в локальную БД и сборка HTML-отчёта; у неё свой
+    выбор аккаунта Garmin (аналитика работает только с Garmin).
+
+Аккаунты Garmin хранятся как раньше — токен в ~/.garth/<логин>. Аккаунты intervals.icu (API key +
+Athlete ID) сохраняются под произвольным именем в uploader_config.json (сам ключ хранится локально,
+как и раньше он хранился в текстовом поле формы — это не более секретно, чем это было).
 
 ЗАПУСК
   python plan_uploader_gui.py
@@ -62,14 +68,19 @@ RU_MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Ма
              "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
 RU_WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
-DEFAULT_CATCHUP_OVERLAP_DAYS = 2   # на сколько дней назад от последней записи в базе
-                                    # перечитываем при авто-обновлении при старте
-                                    # (на случай, если последняя выгрузка была неполной)
 INITIAL_LOAD_DAYS = 365            # диапазон по умолчанию для самой первой (ручной) выгрузки
+
+SERVICE_LABELS = {"garmin": "Garmin", "intervals": "Intervals.icu"}
+
+
+def upload_account_label(kind, name):
+    """Единый формат подписи аккаунта в объединённом списке: '<сервис> - <имя аккаунта>'."""
+    return f"{SERVICE_LABELS.get(kind, kind)} - {name}"
 
 
 # ---------------------------------------------------------------------------
-# Конфиг GUI (НЕ токены Garmin — только «какая база у какого аккаунта» и т.п.)
+# Конфиг GUI (НЕ токены Garmin — только «какая база у какого аккаунта», сохранённые
+# именованные аккаунты intervals.icu и т.п.)
 # ---------------------------------------------------------------------------
 def load_config():
     try:
@@ -279,54 +290,154 @@ class AddAccountDialog(tk.Toplevel):
         self.destroy()
 
 
+class AddIntervalsAccountDialog(tk.Toplevel):
+    """Диалог добавления именованного аккаунта intervals.icu (имя + API key + Athlete ID).
+
+    В отличие от Garmin, у intervals.icu нет отдельного «входа» — просто пара (API key,
+    Athlete ID). Чтобы такой аккаунт появился рядом с Garmin в едином списке "<сервис> -
+    <имя>", он сохраняется под произвольным именем в uploader_config.json (cfg["intervals_
+    accounts"]), а не в переменных окружения.
+    """
+
+    def __init__(self, master_app, on_done):
+        super().__init__(master_app)
+        self.master_app = master_app
+        self.on_done = on_done
+        self.title("intervals.icu — добавить аккаунт")
+        self.resizable(False, False)
+        self.transient(master_app)
+
+        pad = {"padx": 8, "pady": 4}
+        ttk.Label(self, text="Имя аккаунта (для отображения):").grid(row=0, column=0, sticky="w", **pad)
+        self.name_var = tk.StringVar()
+        ttk.Entry(self, textvariable=self.name_var, width=32).grid(row=0, column=1, **pad)
+
+        ttk.Label(self, text="API key:").grid(row=1, column=0, sticky="w", **pad)
+        self.key_var = tk.StringVar(value=os.environ.get("INTERVALS_API_KEY", ""))
+        ttk.Entry(self, textvariable=self.key_var, width=32, show="*").grid(row=1, column=1, **pad)
+
+        ttk.Label(self, text="Athlete ID (например i123456):").grid(row=2, column=0, sticky="w", **pad)
+        self.athlete_var = tk.StringVar(value=os.environ.get("INTERVALS_ATHLETE_ID", ""))
+        ttk.Entry(self, textvariable=self.athlete_var, width=32).grid(row=2, column=1, **pad)
+
+        self.status_var = tk.StringVar(value="")
+        ttk.Label(self, textvariable=self.status_var, foreground="#555").grid(
+            row=3, column=0, columnspan=2, sticky="w", **pad)
+
+        btns = ttk.Frame(self)
+        btns.grid(row=4, column=0, columnspan=2, pady=(4, 8))
+        ttk.Button(btns, text="Сохранить", command=self._go).pack(side="left", padx=6)
+        ttk.Button(btns, text="Отмена", command=self._cancel).pack(side="left", padx=6)
+
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+
+    def _go(self):
+        name = self.name_var.get().strip()
+        key = self.key_var.get().strip()
+        athlete = self.athlete_var.get().strip()
+        if not name or not key or not athlete:
+            messagebox.showerror("Ошибка", "Заполни имя, API key и Athlete ID.", parent=self)
+            return
+        cfg = self.master_app.cfg
+        cfg.setdefault("intervals_accounts", {})[name] = {"key": key, "athlete": athlete}
+        save_config(cfg)
+        self.status_var.set("Сохранено.")
+        self.on_done(name)
+        self.destroy()
+
+    def _cancel(self):
+        self.on_done(None)
+        self.destroy()
+
+
+class ChooseServiceDialog(tk.Toplevel):
+    """Маленький диалог «какой сервис?» перед добавлением нового аккаунта в объединённый
+    список загрузки плана."""
+
+    def __init__(self, master, on_choice):
+        super().__init__(master)
+        self.on_choice = on_choice
+        self.title("Новый аккаунт")
+        self.resizable(False, False)
+        self.transient(master)
+
+        ttk.Label(self, text="Для какого сервиса добавить аккаунт?").pack(padx=14, pady=(14, 6))
+        btns = ttk.Frame(self)
+        btns.pack(padx=14, pady=(0, 14))
+        ttk.Button(btns, text="Garmin Connect", command=lambda: self._pick("garmin")).pack(side="left", padx=6)
+        ttk.Button(btns, text="intervals.icu", command=lambda: self._pick("intervals")).pack(side="left", padx=6)
+
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", lambda: self._pick(None))
+
+    def _pick(self, kind):
+        self.destroy()
+        self.on_choice(kind)
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Garmin / intervals.icu — план и аналитика")
-        self.geometry("860x820")
+        self.geometry("880x860")
         self.log_queue = queue.Queue()
         self.busy = False
         self.cfg = load_config()
+        self.current_upload_kind = None
+        self.current_upload_name = None
+        self._upload_account_map = {}
         self._build()
         self.after(150, self._drain_log)
-        self.after(700, self._startup_catchup)
 
-    # ---------- UI ----------
+    # ---------- UI (верхний уровень: две вкладки) ----------
     def _build(self):
         pad = {"padx": 6, "pady": 4}
 
-        # --- аккаунт Garmin (общий для вкладок "Garmin Connect" и "Аналитика") ---
-        af = ttk.LabelFrame(self, text="Аккаунт Garmin (общий для загрузки плана и аналитики)")
+        top_nb = ttk.Notebook(self)
+        top_nb.pack(fill="both", expand=True, **pad)
+
+        upload_tab = ttk.Frame(top_nb)
+        top_nb.add(upload_tab, text="Загрузка плана")
+        analytics_tab = ttk.Frame(top_nb)
+        top_nb.add(analytics_tab, text="Аналитика")
+
+        self._build_upload_tab(upload_tab, pad)
+        self._build_analytics_tab(analytics_tab, pad)
+
+        # --- лог (общий, виден независимо от выбранной вкладки) ---
+        lf = ttk.LabelFrame(self, text="Лог")
+        lf.pack(fill="both", expand=False, **pad)
+        self.log = tk.Text(lf, height=10, wrap="word", state="disabled")
+        self.log.pack(fill="both", expand=True, padx=6, pady=6)
+
+    # ---------- вкладка "Загрузка плана" ----------
+    def _build_upload_tab(self, parent, pad):
+        # --- единый выбор аккаунта: Garmin ИЛИ intervals.icu ---
+        af = ttk.LabelFrame(parent, text="Аккаунт для загрузки")
         af.pack(fill="x", **pad)
-        self.garmin_account_var = tk.StringVar(value=self.cfg.get("last_account")
-                                                or os.environ.get("GARMIN_EMAIL", ""))
-        self.garmin_account_combo = ttk.Combobox(af, textvariable=self.garmin_account_var, width=32,
-                                                  values=self._saved_accounts(), state="readonly")
-        self.garmin_account_combo.grid(row=0, column=0, sticky="w", padx=6, pady=6)
-        self.garmin_account_combo.bind("<<ComboboxSelected>>", lambda e: self._on_account_change())
-        ttk.Button(af, text="＋ Добавить / войти…", command=self._add_account) \
+        self.upload_account_var = tk.StringVar()
+        self.upload_account_combo = ttk.Combobox(af, textvariable=self.upload_account_var, width=40,
+                                                  state="readonly")
+        self.upload_account_combo.grid(row=0, column=0, sticky="w", padx=6, pady=6)
+        self.upload_account_combo.bind("<<ComboboxSelected>>", lambda e: self._on_upload_account_change())
+        ttk.Button(af, text="＋ Добавить аккаунт…", command=self._add_upload_account) \
             .grid(row=0, column=1, sticky="w", padx=6, pady=6)
-        ttk.Button(af, text="Обновить список", command=self._refresh_accounts) \
+        ttk.Button(af, text="Обновить список", command=self._refresh_upload_accounts) \
             .grid(row=0, column=2, sticky="w", padx=6, pady=6)
-        self.account_status_var = tk.StringVar(value="")
-        ttk.Label(af, textvariable=self.account_status_var, foreground="#555") \
+        self.upload_account_status_var = tk.StringVar(value="")
+        ttk.Label(af, textvariable=self.upload_account_status_var, foreground="#555") \
             .grid(row=1, column=0, columnspan=3, sticky="w", padx=6)
 
-        accs = self._saved_accounts()
-        if len(accs) == 1 and not self.garmin_account_var.get():
-            self.garmin_account_var.set(accs[0])
-        if self.garmin_account_var.get():
-            self._on_account_change(initial=True)
-
         # --- plan.json ---
-        f0 = ttk.LabelFrame(self, text="План")
+        f0 = ttk.LabelFrame(parent, text="План")
         f0.pack(fill="x", **pad)
         self.plan_var = tk.StringVar()
         ttk.Entry(f0, textvariable=self.plan_var, width=70).pack(side="left", padx=6, pady=6, fill="x", expand=True)
         ttk.Button(f0, text="Выбрать plan.json…", command=self._pick_plan).pack(side="left", padx=6, pady=6)
 
         # --- общие опции ---
-        f1 = ttk.LabelFrame(self, text="Общие опции загрузки плана")
+        f1 = ttk.LabelFrame(parent, text="Общие опции загрузки плана")
         f1.pack(fill="x", **pad)
         self.dry_run_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(f1, text="Сухой прогон (--dry-run, ничего не отправлять)",
@@ -340,22 +451,30 @@ class App(tk.Tk):
             self.skip_cross_list.insert("end", SKIP_CROSS_LABELS.get(code, code))
         self.skip_cross_list.grid(row=1, column=1, sticky="w", **pad)
 
-        nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, **pad)
+        # --- панель настроек конкретного сервиса: показывается только та, что
+        # соответствует сервису выбранного вверху аккаунта (переключается программно,
+        # выбор вкладками пользователю не нужен — сервис уже определён аккаунтом) ---
+        self.service_panel = ttk.Frame(parent)
+        self.service_panel.pack(fill="both", expand=True, **pad)
+        self._build_garmin_tab(self.service_panel, pad)
+        self._build_intervals_tab(self.service_panel, pad)
+        self.garmin_panel.pack(in_=self.service_panel, fill="both", expand=True)
 
-        self._build_garmin_tab(nb, pad)
-        self._build_intervals_tab(nb, pad)
-        self._build_analytics_tab(nb, pad)
+        self._refresh_upload_accounts(initial=True)
 
-        # --- лог ---
-        lf = ttk.LabelFrame(self, text="Лог")
-        lf.pack(fill="both", expand=True, **pad)
-        self.log = tk.Text(lf, height=14, wrap="word", state="disabled")
-        self.log.pack(fill="both", expand=True, padx=6, pady=6)
+    def _show_service_panel(self, kind):
+        """Показывает панель настроек нужного сервиса и прячет вторую — сервис
+        определяется выбранным вверху аккаунтом, отдельного переключателя нет."""
+        if kind == "intervals":
+            self.garmin_panel.pack_forget()
+            self.intervals_panel.pack(in_=self.service_panel, fill="both", expand=True)
+        else:
+            self.intervals_panel.pack_forget()
+            self.garmin_panel.pack(in_=self.service_panel, fill="both", expand=True)
 
-    def _build_garmin_tab(self, nb, pad):
-        gf = ttk.Frame(nb)
-        nb.add(gf, text="Garmin Connect (загрузка плана)")
+    def _build_garmin_tab(self, parent, pad):
+        gf = ttk.Frame(parent)
+        self.garmin_panel = gf
 
         self.garmin_test_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(gf, text="Только первая неделя (--test)",
@@ -393,9 +512,9 @@ class App(tk.Tk):
         ttk.Button(gf, text="Отправить в Garmin Connect", command=self._run_garmin) \
             .grid(row=7, column=0, columnspan=2, sticky="w", padx=6, pady=12)
 
-    def _build_intervals_tab(self, nb, pad):
-        idf = ttk.Frame(nb)
-        nb.add(idf, text="intervals.icu")
+    def _build_intervals_tab(self, parent, pad):
+        idf = ttk.Frame(parent)
+        self.intervals_panel = idf
         ttk.Label(idf, text="API key:").grid(row=0, column=0, sticky="w", **pad)
         self.intervals_key_var = tk.StringVar(value=os.environ.get("INTERVALS_API_KEY", ""))
         ttk.Entry(idf, textvariable=self.intervals_key_var, width=40, show="*").grid(row=0, column=1, sticky="w", **pad)
@@ -404,6 +523,9 @@ class App(tk.Tk):
         self.intervals_athlete_var = tk.StringVar(value=os.environ.get("INTERVALS_ATHLETE_ID", ""))
         ttk.Entry(idf, textvariable=self.intervals_athlete_var, width=20).grid(row=1, column=1, sticky="w", **pad)
 
+        ttk.Button(idf, text="💾 Сохранить в выбранный аккаунт", command=self._save_intervals_account) \
+            .grid(row=1, column=2, sticky="w", padx=6)
+
         self.intervals_clear_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(idf, text="Удалить ранее загруженные события плана перед загрузкой (--clear)",
                          variable=self.intervals_clear_var).grid(row=2, column=0, columnspan=2, sticky="w", **pad)
@@ -411,9 +533,31 @@ class App(tk.Tk):
         ttk.Button(idf, text="Отправить в intervals.icu", command=self._run_intervals) \
             .grid(row=3, column=0, columnspan=2, sticky="w", padx=6, pady=12)
 
-    def _build_analytics_tab(self, nb, pad):
-        anf = ttk.Frame(nb)
-        nb.add(anf, text="Аналитика")
+    # ---------- вкладка "Аналитика" ----------
+    def _build_analytics_tab(self, parent, pad):
+        # --- аккаунт Garmin (аналитика работает только с Garmin) ---
+        af = ttk.LabelFrame(parent, text="Аккаунт Garmin")
+        af.pack(fill="x", **pad)
+        self.garmin_account_var = tk.StringVar(value=self.cfg.get("last_account")
+                                                or os.environ.get("GARMIN_EMAIL", ""))
+        self.garmin_account_combo = ttk.Combobox(af, textvariable=self.garmin_account_var, width=32,
+                                                  values=self._saved_garmin_accounts(), state="readonly")
+        self.garmin_account_combo.grid(row=0, column=0, sticky="w", padx=6, pady=6)
+        self.garmin_account_combo.bind("<<ComboboxSelected>>", lambda e: self._on_account_change())
+        ttk.Button(af, text="＋ Добавить / войти…", command=self._add_account) \
+            .grid(row=0, column=1, sticky="w", padx=6, pady=6)
+        ttk.Button(af, text="Обновить список", command=self._refresh_accounts) \
+            .grid(row=0, column=2, sticky="w", padx=6, pady=6)
+        self.account_status_var = tk.StringVar(value="")
+        ttk.Label(af, textvariable=self.account_status_var, foreground="#555") \
+            .grid(row=1, column=0, columnspan=3, sticky="w", padx=6)
+
+        accs = self._saved_garmin_accounts()
+        if len(accs) == 1 and not self.garmin_account_var.get():
+            self.garmin_account_var.set(accs[0])
+
+        anf = ttk.Frame(parent)
+        anf.pack(fill="both", expand=True, **pad)
 
         ttk.Label(anf, text="Локальная база (SQLite):").grid(row=0, column=0, sticky="w", **pad)
         self.analytics_db_var = tk.StringVar()
@@ -463,15 +607,97 @@ class App(tk.Tk):
 
         anf.columnconfigure(1, weight=1)
 
-    # ---------- аккаунт ----------
-    def _saved_accounts(self):
+        if self.garmin_account_var.get():
+            self._on_account_change(initial=True)
+
+    # ---------- объединённый аккаунт для загрузки плана (Garmin ИЛИ intervals.icu) ----------
+    def _intervals_accounts(self):
+        return self.cfg.get("intervals_accounts", {})
+
+    def _upload_account_items(self):
+        items = [("garmin", acc) for acc in self._saved_garmin_accounts()]
+        items += [("intervals", name) for name in sorted(self._intervals_accounts().keys())]
+        return items
+
+    def _refresh_upload_accounts(self, initial=False):
+        items = self._upload_account_items()
+        self._upload_account_map = {upload_account_label(k, n): (k, n) for k, n in items}
+        labels = list(self._upload_account_map.keys())
+        self.upload_account_combo["values"] = labels
+        if not labels:
+            self.upload_account_status_var.set(
+                "Нет сохранённых аккаунтов — добавь через «＋ Добавить аккаунт…».")
+            self.current_upload_kind = None
+            self.current_upload_name = None
+            return
+        want = self.cfg.get("last_upload_account")
+        if want not in self._upload_account_map:
+            want = self.upload_account_var.get() if self.upload_account_var.get() in self._upload_account_map \
+                else labels[0]
+        self.upload_account_var.set(want)
+        self._on_upload_account_change(initial=initial)
+
+    def _on_upload_account_change(self, initial=False):
+        label = self.upload_account_var.get()
+        kind_name = self._upload_account_map.get(label)
+        if not kind_name:
+            return
+        kind, name = kind_name
+        self.current_upload_kind, self.current_upload_name = kind, name
+        if kind == "garmin":
+            self.upload_account_status_var.set(f"Активный аккаунт: {label}")
+        else:
+            prof = self._intervals_accounts().get(name, {})
+            self.intervals_key_var.set(prof.get("key", ""))
+            self.intervals_athlete_var.set(prof.get("athlete", ""))
+            self.upload_account_status_var.set(f"Активный аккаунт: {label}")
+        self._show_service_panel(kind)
+        self.cfg["last_upload_account"] = label
+        if not initial:
+            save_config(self.cfg)
+
+    def _add_upload_account(self):
+        def on_service_chosen(kind):
+            if kind == "garmin":
+                def on_done(email):
+                    if email:
+                        self._refresh_upload_accounts()
+                        self.upload_account_var.set(upload_account_label("garmin", email))
+                        self._on_upload_account_change()
+                        messagebox.showinfo("Аккаунт", f"Вошли как {email}, токен сохранён.")
+                AddAccountDialog(self, on_done)
+            elif kind == "intervals":
+                def on_done(name):
+                    if name:
+                        self._refresh_upload_accounts()
+                        self.upload_account_var.set(upload_account_label("intervals", name))
+                        self._on_upload_account_change()
+                AddIntervalsAccountDialog(self, on_done)
+
+        ChooseServiceDialog(self, on_service_chosen)
+
+    def _save_intervals_account(self):
+        if self.current_upload_kind != "intervals" or not self.current_upload_name:
+            messagebox.showerror("Ошибка", "Сначала выбери (или добавь) аккаунт intervals.icu вверху вкладки.")
+            return
+        key = self.intervals_key_var.get().strip()
+        athlete = self.intervals_athlete_var.get().strip()
+        if not key or not athlete:
+            messagebox.showerror("Ошибка", "Укажи API key и Athlete ID.")
+            return
+        self.cfg.setdefault("intervals_accounts", {})[self.current_upload_name] = {"key": key, "athlete": athlete}
+        save_config(self.cfg)
+        messagebox.showinfo("Сохранено", f"Обновлён аккаунт intervals.icu «{self.current_upload_name}».")
+
+    # ---------- аккаунт Garmin (для вкладки "Аналитика") ----------
+    def _saved_garmin_accounts(self):
         try:
             return gp.saved_accounts()
         except Exception:
             return []
 
     def _refresh_accounts(self):
-        accs = self._saved_accounts()
+        accs = self._saved_garmin_accounts()
         self.garmin_account_combo["values"] = accs
         if not accs:
             messagebox.showinfo("Аккаунты", "Сохранённых аккаунтов Garmin не найдено (~/.garth).")
@@ -479,7 +705,7 @@ class App(tk.Tk):
     def _add_account(self):
         def on_done(email):
             if email:
-                accs = self._saved_accounts()
+                accs = self._saved_garmin_accounts()
                 self.garmin_account_combo["values"] = accs
                 self.garmin_account_var.set(email)
                 self._on_account_change()
@@ -608,6 +834,9 @@ class App(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _run_garmin(self):
+        if self.current_upload_kind != "garmin" or not self.current_upload_name:
+            messagebox.showerror("Ошибка", "Выбери аккаунт Garmin вверху вкладки «Загрузка плана».")
+            return
         plan = self.plan_var.get().strip()
         self._run_in_thread(
             gp.run_import,
@@ -618,7 +847,7 @@ class App(tk.Tk):
             clear_past=self.garmin_clear_past_var.get(),
             before=self.garmin_before_var.get().strip() or None,
             skip_cross=self._skip_cross_value(),
-            account=self.garmin_account_var.get().strip() or None,
+            account=self.current_upload_name,
             password=None,
             mfa_prompt=self._ask_mfa,
             all_dates=self.garmin_all_dates_var.get(),
@@ -626,6 +855,9 @@ class App(tk.Tk):
         )
 
     def _run_intervals(self):
+        if self.current_upload_kind != "intervals" or not self.current_upload_name:
+            messagebox.showerror("Ошибка", "Выбери аккаунт intervals.icu вверху вкладки «Загрузка плана».")
+            return
         plan = self.plan_var.get().strip()
         self._run_in_thread(
             ii.run_import,
@@ -654,6 +886,7 @@ class App(tk.Tk):
             temperature_unit="c",
             no_detail_confounds=False,
             no_grade_adjusted_pace=False,
+            no_device_temperature=False,
             grade_adjusted_min_elevation_m=30,
             dump_raw=None,
             max_chart_size=4000,
@@ -679,7 +912,7 @@ class App(tk.Tk):
     def _run_analytics_import(self):
         account = self.garmin_account_var.get().strip()
         if not account:
-            messagebox.showerror("Ошибка", "Сначала выбери или добавь аккаунт Garmin вверху окна.")
+            messagebox.showerror("Ошибка", "Сначала выбери или добавь аккаунт Garmin вверху вкладки «Аналитика».")
             return
         db_path = self.analytics_db_var.get().strip() or default_db_name(account)
         start = self.analytics_from_var.get().strip()
@@ -713,39 +946,6 @@ class App(tk.Tk):
                 webbrowser.open("file://" + os.path.abspath(out_path))
 
         self._run_in_thread(br.main, db_path, out_path, require_plan=False, on_done=on_done)
-
-    # ---------- авто-обновление при старте ----------
-    def _startup_catchup(self):
-        if self.busy:
-            return
-        account = self.garmin_account_var.get().strip()
-        if not account:
-            return
-        db_path = self.analytics_db_var.get().strip()
-        if not db_path or not os.path.isfile(db_path):
-            return  # первой загрузки ещё не было — ждём ручного действия с явным периодом
-        last = db_last_activity_date(db_path)
-        if not last:
-            return
-        try:
-            last_d = datetime.date.fromisoformat(last)
-        except ValueError:
-            return
-        start = (last_d - datetime.timedelta(days=DEFAULT_CATCHUP_OVERLAP_DAYS)).isoformat()
-        end = datetime.date.today().isoformat()
-        if start > end:
-            return
-
-        import garmin_activities_export as gae
-        ns = self._analytics_namespace(start, end, db_path, force_refresh_wellness=False)
-
-        def on_done(ok):
-            if ok:
-                self._refresh_analytics_last_label()
-
-        self.log_queue.put(f"[Авто-обновление] {account}: догружаю тренировки с {start} по {end}…\n")
-        self._run_in_thread(gae.export, ns, require_plan=False, on_done=on_done)
-
 
 if __name__ == "__main__":
     App().mainloop()

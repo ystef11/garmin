@@ -22,7 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,8 +30,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.example.runstef.security.BiometricAuth
 
 private const val PIN_LENGTH = 4
@@ -138,8 +141,27 @@ private fun PinUnlockContent(
         )
     }
 
-    LaunchedEffect(Unit) {
-        if (showBiometric) triggerBiometric()
+    // ВАЖНО (см. диалог 2026-08-23: "при выходе из блокировки экрана открывается окно ввода
+    // пин-кода, хотя включена биометрия"): раньше здесь стоял LaunchedEffect(Unit), который
+    // срабатывает сразу при входе композиции в дерево - а это происходит уже в момент, когда
+    // authViewModel.lockNow() сбрасывает unlocked (см. MainActivity: ON_STOP -> lockNow()),
+    // т.е. ЕЩЁ ДО того, как экран реально включился и Activity вернулась в RESUMED. Показ
+    // системного BiometricPrompt в этот момент тихо проваливается (окно не в фокусе), а
+    // повторно LaunchedEffect(Unit) уже не срабатывает - в итоге пользователь видел только
+    // ПИН-клавиатуру без попытки биометрии. Исправлено: слушаем реальные события жизненного
+    // цикла Activity и показываем биометрию только на ON_RESUME (когда окно точно видно и в
+    // фокусе) - Lifecycle сам досылает недостающие события новому наблюдателю, если Activity
+    // уже в RESUMED к моменту подписки, так что случай "уже разблокировано, когда добавили
+    // наблюдателя" тоже работает.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && showBiometric) {
+                triggerBiometric()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Column(

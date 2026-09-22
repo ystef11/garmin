@@ -11,9 +11,13 @@ import kotlin.math.min
  * уличные тренировки vs тредмил, в пересекающемся диапазоне пульса; посчитано напрямую по
  * БД, без внешнего calibration_profile.json).
  *
- * ЗДЕСЬ (в отличие от десктопа) калибровка применяется ТОЛЬКО к activities (distance_m/
- * avg_pace_s_per_km), НЕ к отдельным лапам/интервалам — apk пока не строит темп-по-зонам из
- * интервалов (см. TODO в памяти проекта), так что калибровка лапов пока не нужна.
+ * applyTreadmillCalibration() ниже трогает ТОЛЬКО activities — калибровку ЛАП делает отдельная
+ * applyTreadmillCalibrationToIntervals() (см. ниже в этом файле), т.к. подготовка данных для
+ * activities и для intervals идёт разными путями в AnalyticsReportBuilder.build(). ИСПРАВЛЕНО
+ * 2026-08-24: раньше здесь было написано, что "apk не строит темп-по-зонам из интервалов", и
+ * калибровка/GAP для лап не делались вовсе — это устарело (recentPaceByZone/
+ * paceByZoneQuarterly/detectQualityWorkLaps/detectRaceBlowup/intervalThresholdVdotPoints уже
+ * читают IntervalRow.avgPaceSPerKm напрямую) — теперь обе функции вызываются в build().
  */
 data class TreadmillCalibration(
     val applied: Boolean,
@@ -129,14 +133,53 @@ fun applyTreadmillCalibration(activities: List<ActivityRow>, tc: TreadmillCalibr
 }
 
 /**
- * Порт apply_grade_adjustment() из build_report.py (упрощённо, только на уровне activities —
- * apk не строит темп-по-зонам из интервалов, так что лапы не трогаем): там, где для тренировки
- * есть avgGapSPerKm (GAP, темп с поправкой на уклон — см. GarminActivitiesApi.fetchGradeAdjusted
- * PaceByLap), он подменяет собой avgPaceSPerKm ВЕЗДЕ дальше по отчёту (тренд темпа по неделям,
- * таблица тренировок и т.п.) — так десктопный отчёт с этого момента везде тоже работает с GAP,
- * а не с сырым темпом по GPS-дистанции. GAP есть только для уличных пробежек с заметным набором
- * высоты (см. importRange) — для остальных тренировок avgPaceSPerKm остаётся как было.
+ * Порт распространения apply_treadmill_calibration() на лапы (intervals) — раньше ЭТА функция
+ * не существовала вообще: комментарий выше по файлу объяснял отсутствие тем, что "apk не строит
+ * темп-по-зонам из интервалов", но это устарело — recentPaceByZone/paceByZoneQuarterly/
+ * detectQualityWorkLaps/detectRaceBlowup/intervalThresholdVdotPoints и другие уже читают
+ * IntervalRow.avgPaceSPerKm напрямую. [treadmillActivityIds] — id активностей с sport ==
+ * "treadmill_running" (лапы сами по себе sport не хранят, только через свою activityId).
+ */
+fun applyTreadmillCalibrationToIntervals(
+    intervalsByActivity: Map<Long, List<IntervalRow>>,
+    treadmillActivityIds: Set<Long>,
+    tc: TreadmillCalibration
+): Map<Long, List<IntervalRow>> {
+    val factor = tc.factor
+    if (!tc.applied || factor == null) return intervalsByActivity
+    return intervalsByActivity.mapValues { (activityId, laps) ->
+        if (activityId !in treadmillActivityIds) laps
+        else laps.map { l ->
+            val newDistance = l.distanceM?.let { it * factor }
+            val newPace = l.avgPaceSPerKm?.let { it / factor }
+            l.copy(distanceM = newDistance, avgPaceSPerKm = newPace)
+        }
+    }
+}
+
+/**
+ * Порт apply_grade_adjustment() из build_report.py:
+ * там, где для тренировки есть avgGapSPerKm (GAP, темп с поправкой на уклон — см.
+ * GarminActivitiesApi.fetchGradeAdjustedPaceByLap), он подменяет собой avgPaceSPerKm ВЕЗДЕ
+ * дальше по отчёту (тренд темпа по неделям, таблица тренировок и т.п.) — так десктопный отчёт с
+ * этого момента везде тоже работает с GAP, а не с сырым темпом по GPS-дистанции. GAP есть только
+ * для уличных пробежек с заметным набором высоты (см. importRange) — для остальных тренировок
+ * avgPaceSPerKm остаётся как было. Лапы обрабатывает отдельная applyGradeAdjustmentToIntervals()
+ * ниже в этом файле (см. ИСПРАВЛЕНО 2026-08-24 в комментарии выше).
  * ВЫЗЫВАТЬ ПОСЛЕ applyTreadmillCalibration (как и в десктопе — калибровка дорожки, потом GAP).
  */
 fun applyGradeAdjustment(activities: List<ActivityRow>): List<ActivityRow> =
     activities.map { a -> if (a.avgGapSPerKm != null) a.copy(avgPaceSPerKm = a.avgGapSPerKm) else a }
+
+/**
+ * Порт распространения apply_grade_adjustment() на лапы (intervals) — раньше отсутствовала (см.
+ * комментарий над applyTreadmillCalibrationToIntervals выше: то же устаревшее предположение).
+ * Подменяет avgPaceSPerKm лапа на его собственный avgGapSPerKm, где он есть (GAP считается ПО
+ * ЛАПУ отдельно, см. GarminActivitiesApi.fetchGradeAdjustedPaceByLap — НЕ общий коэффициент
+ * активности). ВЫЗЫВАТЬ ПОСЛЕ applyTreadmillCalibrationToIntervals (тот же порядок, что и в
+ * десктопе: сначала калибровка дорожки, потом GAP).
+ */
+fun applyGradeAdjustmentToIntervals(intervalsByActivity: Map<Long, List<IntervalRow>>): Map<Long, List<IntervalRow>> =
+    intervalsByActivity.mapValues { (_, laps) ->
+        laps.map { l -> if (l.avgGapSPerKm != null) l.copy(avgPaceSPerKm = l.avgGapSPerKm) else l }
+    }

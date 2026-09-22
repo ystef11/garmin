@@ -367,7 +367,24 @@ def fetch_sleep_day(garth, username, date_str):
         "sleep_rhr": (data or {}).get("restingHeartRate"),
         "skin_temp_deviation_c": (data or {}).get("avgSkinTempDeviationC"),
         "sleep_training_feedback": sleep_need.get("trainingFeedback"),
+        "sleep_start_local": _local_ms_to_iso(dto.get("sleepStartTimestampLocal")),
+        "sleep_end_local": _local_ms_to_iso(dto.get("sleepEndTimestampLocal")),
     }
+
+
+def _local_ms_to_iso(ms):
+    """dailySleepDTO.sleep{Start,End}TimestampLocal — эпоха в миллисекундах, где само
+    число уже закодировано как локальное время суток (Garmin представляет местное время
+    так, будто оно UTC, без реального смещения) — поэтому конвертируем через
+    datetime.utcfromtimestamp, а не fromtimestamp (иначе поедет на локальный TZ машины,
+    где крутится экспортёр). Возвращает ISO-строку локального времени сна (для последующего
+    сопоставления с sleep_score/hrv_last_night_avg по дню)."""
+    if ms is None:
+        return None
+    try:
+        return datetime.datetime.fromtimestamp(ms / 1000.0, tz=datetime.timezone.utc).replace(tzinfo=None).isoformat(sep=" ")
+    except Exception:
+        return None
 
 
 def fetch_hrv_day(garth, date_str):
@@ -1039,6 +1056,7 @@ CREATE TABLE IF NOT EXISTS activities (
     gct_drift_pct              REAL,
     vertical_osc_drift_pct     REAL,
     avg_grade_adjusted_pace_s_per_km REAL,
+    avg_device_temperature_c   REAL,
     exported_at         TEXT
 );
 CREATE TABLE IF NOT EXISTS intervals (
@@ -1099,6 +1117,8 @@ CREATE TABLE IF NOT EXISTS wellness (
     stress_low_s                REAL,
     stress_medium_s             REAL,
     stress_high_s               REAL,
+    sleep_start_local           TEXT,
+    sleep_end_local              TEXT,
     exported_at                 TEXT
 );
 CREATE TABLE IF NOT EXISTS cross_activities (
@@ -1137,7 +1157,7 @@ ACTIVITY_MIGRATION_COLUMNS = [
     ("vigorous_intensity_min", "REAL"), ("hr_time_in_zone_1", "REAL"), ("hr_time_in_zone_2", "REAL"),
     ("hr_time_in_zone_3", "REAL"), ("hr_time_in_zone_4", "REAL"), ("hr_time_in_zone_5", "REAL"),
     ("cadence_drift_pct", "REAL"), ("gct_drift_pct", "REAL"), ("vertical_osc_drift_pct", "REAL"),
-    ("avg_grade_adjusted_pace_s_per_km", "REAL"),
+    ("avg_grade_adjusted_pace_s_per_km", "REAL"), ("avg_device_temperature_c", "REAL"),
 ]
 
 INTERVAL_MIGRATION_COLUMNS = [
@@ -1152,6 +1172,7 @@ WELLNESS_MIGRATION_COLUMNS = [
     ("floors_ascended", "REAL"), ("stress_rest_s", "REAL"), ("stress_activity_s", "REAL"),
     ("stress_uncategorized_s", "REAL"), ("stress_low_s", "REAL"), ("stress_medium_s", "REAL"),
     ("stress_high_s", "REAL"),
+    ("sleep_start_local", "TEXT"), ("sleep_end_local", "TEXT"),
 ]
 
 
@@ -1178,7 +1199,7 @@ def open_db(path):
     return con
 
 
-_ACTIVITY_EXTRA_KEYS = EF_CONFOUND_KEYS + LAP_DRIFT_KEYS + ["avg_grade_adjusted_pace_s_per_km"]
+_ACTIVITY_EXTRA_KEYS = EF_CONFOUND_KEYS + LAP_DRIFT_KEYS + ["avg_grade_adjusted_pace_s_per_km", "avg_device_temperature_c"]
 _INTERVAL_EXTRA_KEYS = ["avg_cadence_spm", "ground_contact_time_ms", "vertical_oscillation_mm",
                         "vertical_ratio", "stride_length_mm", "avg_respiration_rate",
                         "workout_compliance_score", "avg_grade_adjusted_pace_s_per_km"]
@@ -1679,6 +1700,14 @@ def export(args):
             for lap in laps:
                 lap["avg_grade_adjusted_pace_s_per_km"] = None
 
+        # Температура с датчика часов (directAirTemperature, см. fetch_device_temperature) —
+        # тоже поточный эндпоинт /details, отдельный запрос от GAP выше (см. докстринг
+        # fetch_device_temperature про дублирование запроса). --no-device-temperature
+        # отключает, если запись температуры не включена/не нужна.
+        avg_device_temperature_c = None
+        if not getattr(args, "no_device_temperature", False):
+            avg_device_temperature_c = fetch_device_temperature(garth, aid, max_chart_size=args.max_chart_size)
+
         results.append({
             "activity_id": aid,
             "date": date,
@@ -1698,6 +1727,7 @@ def export(args):
             **confounds,
             **drift,
             "avg_grade_adjusted_pace_s_per_km": avg_gap_s_per_km,
+            "avg_device_temperature_c": avg_device_temperature_c,
         })
         gap_note = f", GAP {fmt_pace(avg_gap_s_per_km)}/км" if avg_gap_s_per_km else ""
         print(f"[{i}/{len(acts)}] {date} {name[:40]:40s} -> выгружено ({lap_source}, {len(laps)} лапов{gap_note})")
@@ -1922,7 +1952,7 @@ def dump_activity_fields(garth, activity_id, start_date, end_date):
 # набор ключей (и их порядок) может отличаться по типам тренировок/устройствам — точное имя
 # ("directGradeAdjustedSpeed" — самое вероятное по практике других интеграций с Garmin Connect,
 # но НЕ подтверждено на этом аккаунте) и его metricsIndex нужно увидеть в реальном ответе.
-CONFOUND_KEYWORDS_DETAILS = ["grade", "adjust", "speed", "elev", "pace"]
+CONFOUND_KEYWORDS_DETAILS = ["grade", "adjust", "speed", "elev", "pace", "temp"]
 
 # Подтверждено на реальном аккаунте через --dump-activity-details (диалог 2026-08-17):
 # ключ в metricDescriptors — "directGradeAdjustedSpeed" (м/с). Второй кандидат оставлен
@@ -2017,6 +2047,64 @@ def fetch_grade_adjusted_pace_by_lap(garth, activity_id, laps, max_chart_size=20
                 per_lap[lap["idx"]] = s_per_km(statistics.mean(bucket))
 
     return overall, per_lap
+
+
+# Температура с датчика часов по потоку секунд (диалог 2026-09-11: пользователь включил на
+# часах запись температуры во время тренировки). В отличие от avg_temperature_c (см.
+# _extract_ef_confounds) — та считается из minTemperature/maxTemperature СВОДКИ активности,
+# это ambient-оценка погодного сервиса Garmin на старте/локации активности, доступная всегда,
+# даже без датчика на самих часах, — avg_device_temperature_c это фактическое посекундное
+# измерение датчика часов, есть только если пользователь включил его запись, и приходит
+# ТОЛЬКО из того же поточного эндпоинта /activity-service/activity/{id}/details, что и
+# grade-adjusted pace (см. fetch_grade_adjusted_pace_by_lap выше).
+#
+# Ключ ПОДТВЕРЖДЁН на реальном аккаунте через --dump-activity-details (диалог 2026-09-11):
+# 'directAirTemperature', metricsIndex=7 — сырые значения (напр. 27.0) выглядят как готовые
+# градусы Цельсия без доп. коэффициента (сравни с unit.factor в metricDescriptors, если вдруг
+# на другом устройстве понадобится другая единица). Второй кандидат оставлен на случай другого
+# устройства/версии приложения Garmin, где ключ мог бы называться иначе.
+DEVICE_TEMPERATURE_KEY_CANDIDATES = ["directAirTemperature", "directTemperature"]
+
+
+def fetch_device_temperature(garth, activity_id, max_chart_size=2000):
+    """Средняя температура с датчика часов за тренировку (см. докстринг выше).
+    Best-effort: эндпоинт недоступен, нужного дескриптора нет (не было датчика/не включена
+    запись/старые часы) или все точки пустые -> None, не падает. Отдельный запрос к
+    /details (не переиспользует ответ fetch_grade_adjusted_pace_by_lap) — при включённых
+    и GAP, и температуре на активность с набором высоты будет два запроса к этому
+    эндпоинту вместо одного; можно оптимизировать позже, если станет заметно медленно."""
+    try:
+        path = f"/activity-service/activity/{activity_id}/details?maxChartSize={max_chart_size}&maxPolylineSize={max_chart_size}"
+        details = garth.connectapi(path)
+    except Exception:
+        return None
+    if not isinstance(details, dict):
+        return None
+    descriptors = details.get("metricDescriptors") or []
+
+    idx_temp = None
+    for key in DEVICE_TEMPERATURE_KEY_CANDIDATES:
+        for d in descriptors:
+            if (d.get("key") or "") == key:
+                idx_temp = d.get("metricsIndex")
+                break
+        if idx_temp is not None:
+            break
+    if idx_temp is None:
+        return None
+
+    points = details.get("activityDetailMetrics") or []
+    values = []
+    for p in points:
+        metrics = p.get("metrics") or []
+        if idx_temp >= len(metrics):
+            continue
+        v = metrics[idx_temp]
+        if v is not None:
+            values.append(v)
+    if not values:
+        return None
+    return round(statistics.mean(values), 1)
 
 
 def dump_activity_details(garth, activity_id, max_chart_size=4000):
@@ -2196,6 +2284,13 @@ def main():
                           "исключены) дополнительно запрашивается grade-adjusted pace (по умолчанию 30 м; "
                           "ниже — рельеф обычно не искажает EF настолько, чтобы платить лишним запросом "
                           "по каждой такой активности)")
+    ap.add_argument("--no-device-temperature", action="store_true",
+                     help="не запрашивать /activity-service/activity/{id}/details ради температуры с "
+                          "датчика часов (directAirTemperature, см. fetch_device_temperature/"
+                          "--dump-activity-details) — быстрее, но avg_device_temperature_c останется "
+                          "пустым для всех тренировок. Не путать с avg_temperature_c — та считается из "
+                          "minTemperature/maxTemperature сводки активности (ambient-оценка погодного "
+                          "сервиса, см. --temperature-unit) и не зависит от этого флага")
     ap.add_argument("--dump-raw", metavar="ACTIVITY_ID", help="только выгрузить сырой JSON одной активности (для отладки схемы Garmin API) и выйти")
     ap.add_argument("--dump-activity-fields", metavar="ACTIVITY_ID",
                      help="отладка конфаундов EF (см. докстринг п.14): найти активность и в списке "

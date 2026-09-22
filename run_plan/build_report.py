@@ -38,6 +38,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.patches import Patch
+from matplotlib.colors import to_rgb
 
 plt.rcParams["figure.facecolor"] = "white"
 plt.rcParams["axes.facecolor"] = "white"
@@ -59,6 +60,19 @@ TYPE_LABELS_RU = {
     "mixed": "смешанный",
     "marathon_tempo": "марафонские отрезки",
 }
+
+# Фиксированная категориальная палитра для графиков "наложение по годам" (п.4, п.6) — цвет
+# закреплён за годом по порядку возрастания (2024 всегда первым цветом и т.д.), а не назначается
+# циклически, чтобы один и тот же год был одним и тем же цветом на обоих графиках отчёта.
+YEAR_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+
+
+def year_color_map(years):
+    years_sorted = sorted({int(y) for y in years if y is not None and not (isinstance(y, float) and np.isnan(y))})
+    return {y: YEAR_PALETTE[i % len(YEAR_PALETTE)] for i, y in enumerate(years_sorted)}
+
+
+MONTH_ABBR_RU = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
 
 # Рекомендуемое распределение по пульсовым зонам для разных целевых дистанций (раздел 12 и
 # интерактивный график render_zone_distance_comparison). Идея: чем короче дистанция, тем
@@ -930,53 +944,72 @@ def interval_threshold_vdot_points(activities, intervals, pano=None, min_conf=0.
 
 
 def plot_ef_vdot(wk_ef_roll, races, interval_points=None, xlim=None):
-    fig, ax1 = plt.subplots(figsize=(11, 4.1))
-    ax1.plot(wk_ef_roll.index, wk_ef_roll.values, color="#4C9F70", linewidth=2, label="EF (лёгкий бег, сезонно скорр., скольз. 4нед.)")
-    ax1.set_ylabel("EF (скорость/пульс)", color="#4C9F70")
-    ax1.tick_params(axis="y", labelcolor="#4C9F70")
+    """Наложение по годам: месяц (1-12) по оси X вместо календарной даты — один и тот же месяц
+    в разные годы попадает в одну и ту же точку по горизонтали, поэтому виден и сезонный ход
+    внутри года, и год-к-году сравнение (год = цвет, из year_color_map). Раньше график шёл одной
+    сплошной лентой через всю историю: многолетний тренд и сезонность были неразделимы. Разбит
+    на два подграфика (EF сверху, VDOT снизу) вместо прежней двойной оси Y — общая ось X (месяц)
+    и общая цветовая легенда по годам под обоими. xlim больше не используется (ось X теперь
+    месяц, а не дата), параметр оставлен только чтобы не ломать вызывающий код.
+    """
+    ef = wk_ef_roll.dropna()
+    ef_df = pd.DataFrame({"date": ef.index, "ef": ef.values})
+    ef_df["year"] = ef_df["date"].dt.year
+    ef_df["month"] = ef_df["date"].dt.month
+    ef_monthly = ef_df.groupby(["year", "month"])["ef"].mean().reset_index()
 
-    ax2 = ax1.twinx()
-    if interval_points is not None and len(interval_points):
-        w = interval_points["weight"].clip(0, 1)
-        sizes = 12 + w * 40
-        colors = [(0.90, 0.49, 0.13, 0.18 + wi * 0.42) for wi in w]  # оранжевый, прозрачность ~ достоверности
-        ax2.scatter(interval_points["date"], interval_points["vdot"], s=sizes, c=colors,
-                    edgecolors="none", zorder=3,
-                    label="VDOT, оценка по интервалам/порогу (менее точно, размер/яркость = достоверность)")
+    years = set(ef_monthly["year"])
     if len(races):
-        blown = races[races.get("blowup_detected", False) == True]
-        clean = races[races.get("blowup_detected", False) != True]
-        if len(clean):
-            ax2.scatter(clean["date"], clean["vdot"], color="#E0574C", s=55, zorder=5, label="VDOT (гонки)")
-        if len(blown):
-            ax2.scatter(blown["date"], blown["vdot"], color="#E0574C", s=90, zorder=5,
-                        edgecolors="black", linewidths=1.5, marker="D",
-                        label="VDOT (гонка со срывом темпа — по чистому участку)")
-        for _, r in races.iterrows():
-            ax2.annotate(r["name"].split(" - ")[-1][:18], (r["date"], r["vdot"]),
-                         fontsize=6.5, xytext=(4, 4), textcoords="offset points", color="#8C2A22")
-        # средняя линия VDOT: точки гонок разрежены и неравномерны по времени, поэтому
-        # скользящее окно берём по порядковому номеру гонки (3 точки), а не по календарным
-        # неделям, как для EF — иначе окно почти всегда содержало бы 0-1 точку
-        vdot_ma = races["vdot"].rolling(3, min_periods=1, center=True).mean()
-        ax2.plot(races["date"], vdot_ma, color="#E0574C", linewidth=1.5, linestyle="--",
-                 alpha=0.6, zorder=4, label="VDOT, средняя (скольз. 3 гонки)")
-    ax2.set_ylabel("VDOT", color="#E0574C")
-    ax2.tick_params(axis="y", labelcolor="#E0574C")
+        years |= set(races["date"].dt.year)
+    if interval_points is not None and len(interval_points):
+        years |= set(interval_points["date"].dt.year)
+    colors = year_color_map(years)
 
-    ax1.set_title("4. Динамика EF (лёгкий бег) и VDOT (по гонкам, формула Дэниэлса)")
-    ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
-    ax1.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
-    if xlim:
-        ax1.set_xlim(*xlim)
-    fig.autofmt_xdate()
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    # легенда под графиком (а не поверх данных) — записей стало 6, в одну строку сверху
-    # они перекрывали и точки, и подписи гонок
-    fig.legend(lines1 + lines2, labels1 + labels2, loc="upper center",
-               bbox_to_anchor=(0.5, 0.02), ncol=2, fontsize=7.5, frameon=True)
-    fig.tight_layout(rect=(0, 0.16, 1, 1))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 7.6), sharex=True)
+
+    for year, g in ef_monthly.groupby("year"):
+        g = g.sort_values("month")
+        ax1.plot(g["month"], g["ef"], color=colors[year], linewidth=2, marker="o", markersize=4)
+    ax1.set_ylabel("EF (скорость/пульс)")
+    ax1.set_title("4а. EF лёгкого бега (сезонно скорр., помесячное среднее скольз. 4нед. тренда) — наложение по годам")
+    ax1.grid(axis="y", color="#e1e0d9", linewidth=0.8)
+
+    if interval_points is not None and len(interval_points):
+        ip = interval_points.copy()
+        ip["year"] = ip["date"].dt.year
+        ip["month"] = ip["date"].dt.month
+        for year, g in ip.groupby("year"):
+            wy = g["weight"].clip(0, 1)
+            base_rgb = to_rgb(colors[year])
+            rgba = [(base_rgb[0], base_rgb[1], base_rgb[2], 0.18 + wi * 0.42) for wi in wy]
+            ax2.scatter(g["month"], g["vdot"], s=12 + wy * 40, c=rgba, edgecolors="none",
+                        zorder=2, marker="^")
+
+    if len(races):
+        rdf = races.copy()
+        rdf["year"] = rdf["date"].dt.year
+        rdf["month"] = rdf["date"].dt.month
+        blown = rdf[rdf.get("blowup_detected", False) == True]
+        clean = rdf[rdf.get("blowup_detected", False) != True]
+        for year, g in clean.groupby("year"):
+            ax2.scatter(g["month"], g["vdot"], color=colors[year], s=55, zorder=5)
+        for year, g in blown.groupby("year"):
+            ax2.scatter(g["month"], g["vdot"], color=colors[year], s=90, zorder=5,
+                        edgecolors="black", linewidths=1.5, marker="D")
+    ax2.set_ylabel("VDOT")
+    ax2.set_xlabel("месяц")
+    ax2.set_title("4б. VDOT по месяцам — наложение по годам (● гонка, ◆ гонка со срывом темпа, ▲ оценка по интервалам)")
+    ax2.grid(axis="y", color="#e1e0d9", linewidth=0.8)
+
+    ax2.set_xticks(range(1, 13))
+    ax2.set_xticklabels(MONTH_ABBR_RU)
+    ax2.set_xlim(0.5, 12.5)
+
+    year_handles = [plt.Line2D([0], [0], color=colors[y], linewidth=2, marker="o", markersize=5, label=str(y))
+                    for y in sorted(colors)]
+    fig.legend(handles=year_handles, loc="upper center", bbox_to_anchor=(0.5, 0.015),
+               ncol=min(len(year_handles), 8), fontsize=8, frameon=True, title="год")
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
     return fig_to_base64(fig)
 
 
@@ -1677,10 +1710,17 @@ def zones_table_with_recent_pace(zones, pano, recent_pace_df, weeks_back):
 # "смотреть в динамике" (альтернатива VDOT-нормировке, которая по сути давала бы то же самое,
 # но с дополнительным слоем допущений о форме кривой VDOT~pace).
 
-def pace_by_zone_quarterly(intervals, zones, activities):
-    act_q = activities[["activity_id", "date"]].copy()
-    act_q["quarter"] = act_q["date"].dt.to_period("Q")
-    iv = intervals.merge(act_q[["activity_id", "quarter"]], on="activity_id", how="inner")
+def pace_by_zone_monthly(intervals, zones, activities):
+    """Как раньше pace_by_zone_quarterly, но группировка по (год, месяц) вместо квартала — чтобы
+    графики можно было наложить по годам и сравнивать динамику помесячно (см.
+    plot_pace_by_zone_monthly_by_year): один и тот же календарный месяц в разные годы ложится в
+    одну и ту же точку по оси X, разным цветом на год. Порог по числу сплитов снижен с 8 (было
+    на квартал) до 5 — месяц уже квартала втрое, и с порогом 8 половина месяцев проваливалась бы
+    в NaN."""
+    act_m = activities[["activity_id", "date"]].copy()
+    act_m["year"] = act_m["date"].dt.year
+    act_m["month"] = act_m["date"].dt.month
+    iv = intervals.merge(act_m[["activity_id", "year", "month"]], on="activity_id", how="inner")
     iv = iv[
         iv["avg_hr"].notna() & iv["avg_pace_s_per_km"].notna() &
         (iv["distance_m"] > 150) & (iv["avg_pace_s_per_km"] < 900)
@@ -1696,46 +1736,63 @@ def pace_by_zone_quarterly(intervals, zones, activities):
     iv = iv.dropna(subset=["zone"])
 
     def wavg_pace(g):
-        # Средний темп = суммарное время / суммарная дистанция (эквивалент взвешенного по
-        # дистанции СРЕДНЕГО ГАРМОНИЧЕСКОГО скорости), а НЕ обратное от взвешенного среднего
-        # арифметического скорости — та версия систематически занижала темп (показывала
-        # "быстрее, чем на самом деле"), тем сильнее, чем больше разброс темпа сплитов внутри
-        # зоны/квартала. Пример: сплиты 1км@300с/км + 1км@400с/км -> правильный средний темп
-        # 350 с/км, старая формула давала 342.9 с/км.
-        if len(g) < 8:
+        # Средний темп = суммарное время / суммарная дистанция (взвешенный по дистанции темп,
+        # см. докстринг прежней pace_by_zone_quarterly) — не обратное от взвешенного среднего
+        # арифметического скорости, которое систематически занижает темп.
+        if len(g) < 5:
             return np.nan
         return g["duration_s"].sum() / (g["distance_m"].sum() / 1000.0)
 
-    grouped = iv.groupby(["quarter", "zone"]).apply(wavg_pace).rename("pace").reset_index()
-    counts = iv.groupby(["quarter", "zone"]).size().rename("n").reset_index()
-    grouped = grouped.merge(counts, on=["quarter", "zone"])
-    pivot = grouped.pivot(index="quarter", columns="zone", values="pace")
-    order = [z[0] for z in zones]
-    pivot = pivot.reindex(columns=order)
-    pivot.index = pivot.index.to_timestamp()
-    return pivot, grouped
+    grouped = iv.groupby(["year", "month", "zone"]).apply(wavg_pace).rename("pace").reset_index()
+    counts = iv.groupby(["year", "month", "zone"]).size().rename("n").reset_index()
+    grouped = grouped.merge(counts, on=["year", "month", "zone"])
+    return grouped.dropna(subset=["pace"])
 
 
-def plot_pace_by_zone_quarterly(pivot, zones, xlim=None):
-    fig, ax = plt.subplots(figsize=(11, 4.0))
-    zone_colors = {"Z1 — восстановление": "#7FB3E8", "Z2 — лёгкий/аэробный": "#4C9F70",
-                   "Z3 — марафонский темп": "#9B6BC7", "Z4 — пороговый (до ПАНО)": "#E0A62C",
-                   "Z5 — VO2max/выше ПАНО": "#E0574C"}
-    for name, _, _ in zones:
-        if name in pivot.columns:
-            series = pivot[name].dropna()
-            if len(series) >= 2:
-                ax.plot(series.index, series.values, marker="o", markersize=4,
-                        color=zone_colors.get(name), label=name, linewidth=1.8)
-    ax.set_title("6. Темп по пульсовым зонам В ДИНАМИКЕ, по кварталам (интервалы/сплиты, калибровка дорожки)")
-    ax.set_ylabel("темп, с/км (меньше = быстрее)")
-    ax.invert_yaxis()
-    ax.legend(loc="upper right", fontsize=7.5, ncol=2)
-    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
-    if xlim:
-        ax.set_xlim(*xlim)
-    fig.autofmt_xdate()
+def plot_pace_by_zone_monthly_by_year(grouped, zones, xlim=None):
+    """Сетка мелких графиков (facet), по одному на зону; внутри каждого — темп ПО МЕСЯЦАМ с
+    наложением линий по годам (цвет = год, year_color_map, общий с графиком EF/VDOT п.4). Так
+    виден и сезонный ход темпа внутри года, и год-к-году сравнение одного и того же месяца —
+    раньше единая лента по кварталам через всю историю смешивала оба эффекта. xlim больше не
+    используется (ось X — месяц, не дата), параметр оставлен только чтобы не ломать вызывающий
+    код."""
+    zone_order = [z[0] for z in zones]
+    zone_names = [z for z in zone_order if z in set(grouped["zone"])] or zone_order
+    years = sorted(grouped["year"].dropna().unique())
+    colors = year_color_map(years)
+
+    ncols = 2
+    nrows = max(1, math.ceil(len(zone_names) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(11, 3.1 * nrows), sharex=True)
+    axes = np.atleast_1d(axes).flatten()
+
+    for i, zname in enumerate(zone_names):
+        ax = axes[i]
+        zdf = grouped[grouped["zone"] == zname]
+        for year, g in zdf.groupby("year"):
+            g = g.sort_values("month")
+            if len(g) >= 2:
+                ax.plot(g["month"], g["pace"], color=colors[year], linewidth=1.8, marker="o",
+                        markersize=4)
+        ax.set_title(zname, fontsize=9.5)
+        ax.invert_yaxis()
+        ax.set_xticks(range(1, 13))
+        ax.set_xticklabels(MONTH_ABBR_RU, fontsize=7.5)
+        ax.set_xlim(0.5, 12.5)
+        ax.grid(axis="y", color="#e1e0d9", linewidth=0.8)
+        if i % ncols == 0:
+            ax.set_ylabel("темп, с/км")
+
+    for j in range(len(zone_names), len(axes)):
+        axes[j].axis("off")
+
+    fig.suptitle("6. Темп по пульсовым зонам, по месяцам — наложение по годам (интервалы/сплиты, калибровка дорожки)",
+                 fontsize=11, y=1.0)
+    year_handles = [plt.Line2D([0], [0], color=colors[y], linewidth=2, marker="o", markersize=5, label=str(int(y)))
+                    for y in years]
+    fig.legend(handles=year_handles, loc="upper center", bbox_to_anchor=(0.5, 0.0),
+               ncol=min(len(year_handles), 8), fontsize=8, frameon=True, title="год")
+    fig.tight_layout(rect=(0, 0.05, 1, 0.96))
     return fig_to_base64(fig)
 
 
@@ -2321,23 +2378,19 @@ def main(db_path, out_path, json_path=None):
     # avg_pace_s_per_km_flat. См. docstring apply_grade_adjustment().
     activities, intervals, gap_info = apply_grade_adjustment(activities, intervals)
 
-    # Единая временная ось для ВСЕХ графиков отчёта (см. диалог 2026-08-20) — раньше каждый
-    # график масштабировал ось X под диапазон СВОИХ данных: например, история ПАНО Гармина
-    # (раздел 5) короче истории тренировок на 1-2 недели с каждой стороны, а дневной ряд ACWR
-    # (раздел 9) на 1 день уже недельной сетки остальных графиков (compute_acwr реиндексируется
-    # по своему daily_load.index.min()/max(), а не по общей сетке недель) — из-за этого при
-    # сравнении графиков друг с другом (одна и та же неделя должна быть в одном и том же месте
-    # по горизонтали) они были на пиксель-два не совпадающими. WEEKLY_XLIM — для недельных/
-    # дневных графиков (объём, доли типов, EF/VDOT, VO2max, качество, ACWR), QUARTERLY_XLIM —
-    # для графика по кварталам (темп по зонам): использовать WEEKLY_XLIM там нельзя — недельная
-    # сетка начинается ПОЗЖЕ первого квартала (2024-07-22 против 2024-07-01), это обрезало бы
-    # первую точку.
+    # Единая временная ось для графиков отчёта, где ось X — календарная дата (см. диалог
+    # 2026-08-20) — раньше каждый такой график масштабировал ось X под диапазон СВОИХ данных:
+    # например, история ПАНО Гармина (раздел 5) короче истории тренировок на 1-2 недели с каждой
+    # стороны, а дневной ряд ACWR (раздел 9) на 1 день уже недельной сетки остальных графиков
+    # (compute_acwr реиндексируется по своему daily_load.index.min()/max(), а не по общей сетке
+    # недель) — из-за этого при сравнении графиков друг с другом (одна и та же неделя должна быть
+    # в одном и том же месте по горизонтали) они были на пиксель-два не совпадающими. WEEKLY_XLIM
+    # — для недельных/дневных графиков (объём, доли типов, VO2max, качество, ACWR). EF/VDOT (п.4)
+    # и темп по зонам (п.6) больше не используют дату по оси X — оба перерисованы "наложением по
+    # годам" (месяц 1-12 по горизонтали, цвет = год), поэтому единая календарная ось им не нужна.
     week_start = activities["date"].min().to_period("W-SUN").start_time
     week_end = activities["date"].max().to_period("W-SUN").start_time
     WEEKLY_XLIM = (week_start, week_end)
-    q_start = activities["date"].min().to_period("Q").start_time
-    q_end = activities["date"].max().to_period("Q").start_time
-    QUARTERLY_XLIM = (q_start, q_end)
 
     charts = {}
     tables = {}
@@ -2437,7 +2490,7 @@ def main(db_path, out_path, json_path=None):
     wk_ef_roll, wk_ef = weekly_ef(easy_ef_df)
     races, excluded_races = race_vdot_points(activities, pano_final, intervals=intervals)
     interval_vdot_df = interval_threshold_vdot_points(activities, intervals, pano=pano_final)
-    charts["4a"] = plot_ef_vdot(wk_ef_roll, races, interval_points=interval_vdot_df, xlim=WEEKLY_XLIM)
+    charts["4a"] = plot_ef_vdot(wk_ef_roll, races, interval_points=interval_vdot_df)
     tables["4a"] = races.assign(
         Дата=races["date"].dt.strftime("%Y-%m-%d"),
         Дистанция=(races["distance_m"] / 1000).round(2).astype(str) + " км",
@@ -2514,8 +2567,8 @@ def main(db_path, out_path, json_path=None):
     tables["7"] = zones_table_with_recent_pace(zones, pano_final, recent_pace_df, WEEKS_BACK_PACE)
 
     # Раздел 6 (вся история по кварталам, для сравнения с "актуальным" разделом 3)
-    pace_pivot_q, pace_grouped_q = pace_by_zone_quarterly(intervals, zones, activities)
-    charts["8"] = plot_pace_by_zone_quarterly(pace_pivot_q, zones, xlim=QUARTERLY_XLIM)
+    pace_grouped_m = pace_by_zone_monthly(intervals, zones, activities)
+    charts["8"] = plot_pace_by_zone_monthly_by_year(pace_grouped_m, zones)
 
     # Раздел 5 (текст): оптимальный объём -> будущее изменение EF считается напрямую по БД,
     # calibration_profile.json не нужен
@@ -2657,7 +2710,12 @@ def main(db_path, out_path, json_path=None):
 
     # Раздел 4 (график EF/VDOT, было 3a)
     html.append('<div class="chart-block">')
-    html.append("<h2>4. Тренд эффективности (EF) и VDOT по гонкам</h2>")
+    html.append("<h2>4. Тренд эффективности (EF) и VDOT по гонкам — наложение по месяцам между годами</h2>")
+    html.append(
+        '<p class="meta">Оба подграфика — по месяцам (январь-декабрь), с отдельной линией/точками на каждый '
+        'год (год = цвет, единый со списком годов внизу графика): так виден и сезонный ход внутри года, и '
+        'сравнение одного и того же месяца между годами напрямую, без смешения с многолетним трендом формы.</p>'
+    )
     html.append(img_tag(charts["4a"]))
     if len(tables["4a"]):
         html.append("<h3>Гонки, использованные для VDOT</h3>")
@@ -2674,15 +2732,15 @@ def main(db_path, out_path, json_path=None):
         )
     if interval_vdot_df is not None and len(interval_vdot_df):
         html.append(
-            f'<p class="meta">Оранжевые точки — вспомогательная оценка VDOT по интервальным/пороговым '
-            f'тренировкам ({len(interval_vdot_df)} шт., заполняют периоды без гонок), не по гонкам. '
-            'Внутри тренировки лапы заметно быстрее её собственной медианы считаются "рабочими"; '
-            'коротким рабочим лапам (спринт, &lt;90с) даётся низкий вес — доминирует анаэробная '
-            'составляющая и задержка пульса; лапам 2.5-15 мин — максимальный вес (ближе всего к гоночному '
-            'VDOT); очень длинным лапам (&gt;15 мин) вес снижен и сама оценка занижена на 2-5% как поправка '
-            'на вероятный незаметный провал темпа во второй половине лапа (в лапах нет внутренних сплитов, '
-            'поэтому это фиксированная поправка, а не автодетект, как для гонок). Прозрачность и размер '
-            'точки = итоговая достоверность тренировки (вес лапов минус штраф за разброс между ними). '
+            f'<p class="meta">Треугольники (▲) на п.4б — вспомогательная оценка VDOT по интервальным/пороговым '
+            f'тренировкам ({len(interval_vdot_df)} шт., заполняют периоды без гонок), не по гонкам; цвет — тот '
+            'же год, что и у гонок этого года. Внутри тренировки лапы заметно быстрее её собственной медианы '
+            'считаются "рабочими"; коротким рабочим лапам (спринт, &lt;90с) даётся низкий вес — доминирует '
+            'анаэробная составляющая и задержка пульса; лапам 2.5-15 мин — максимальный вес (ближе всего к '
+            'гоночному VDOT); очень длинным лапам (&gt;15 мин) вес снижен и сама оценка занижена на 2-5% как '
+            'поправка на вероятный незаметный провал темпа во второй половине лапа (в лапах нет внутренних '
+            'сплитов, поэтому это фиксированная поправка, а не автодетект, как для гонок). Прозрачность и '
+            'размер точки = итоговая достоверность тренировки (вес лапов минус штраф за разброс между ними). '
             'Из общей серии робастно (по MAD) отброшены явные выбросы. Считать эти точки наравне с гоночным '
             'VDOT нельзя — это ориентир для периодов без стартов, не замена гонкам.</p>'
         )
@@ -2709,14 +2767,16 @@ def main(db_path, out_path, json_path=None):
 
     # Раздел 6 (темп по зонам по кварталам, вся история, было 9)
     html.append('<div class="chart-block">')
-    html.append("<h2>6. Темп по пульсовым зонам по кварталам (вся история)</h2>")
+    html.append("<h2>6. Темп по пульсовым зонам по месяцам — наложение по годам (вся история)</h2>")
     html.append(img_tag(charts["8"]))
     html.append(
-        '<p class="meta">Темп по зонам показан ПО КВАРТАЛАМ, а не одним средним числом за всю историю — '
-        "за 2 года фитнес менялся (VDOT от ~31 до ~48, см. п.4), и единое среднее смешивало бы темп на "
-        "разных уровнях формы. Точка на графике = квартал, где в зоне набралось ≥8 сплитов (иначе пропуск, "
-        "не рисуется). Темп посчитан по лапам/сплитам (intervals), не по среднему за тренировку целиком — "
-        "исключает искажение от разминки/заминки. Сравни с разделом 3 (последние 8 недель, детальнее).</p>"
+        '<p class="meta">По подграфику на зону; внутри — темп ПО МЕСЯЦАМ (январь-декабрь), отдельная линия на '
+        'каждый год (цвет = год, тот же, что и на графике п.4). Раньше график шёл единой лентой по кварталам '
+        "через всю историю — за прошедшее время фитнес менялся (VDOT от ~31 до ~48, см. п.4), и такая лента "
+        'смешивала сезонный ход темпа с многолетним трендом формы; наложение по годам их разделяет. Точка на '
+        'графике = месяц, где в зоне набралось ≥5 сплитов (иначе пропуск, не рисуется). Темп посчитан по '
+        'лапам/сплитам (intervals), не по среднему за тренировку целиком — исключает искажение от '
+        "разминки/заминки. Сравни с разделом 3 (последние 8 недель, детальнее).</p>"
     )
     html.append("</div>")
 

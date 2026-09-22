@@ -7,6 +7,9 @@ import com.example.runstef.data.IntervalRow
 import com.example.runstef.data.WellnessRow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -14,6 +17,7 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.booleanOrNull
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
@@ -143,6 +147,112 @@ class GarminActivitiesApi(
         return 1000.0 / speedMs
     }
 
+    // ===== Порт _deep_find_key/_first_present/_EF_CONFOUND_FIELD_CANDIDATES/_extract_ef_confounds
+    // из garmin_activities_export.py (~строки 628-750). Рекурсивный (глубина <=6, без учёта
+    // регистра) поиск скалярного значения ключа по всему дереву JSON активности — нужен, т.к.
+    // неофициальный API Garmin в разных версиях/эндпоинтах кладёт одно и то же поле то на
+    // верхний уровень, то во вложенный summaryDTO. Все эти поля уже приходят в ТОМ ЖЕ bulk-
+    // ответе списка активностей, который toActivityRow() и так получает — доп. сетевых
+    // запросов НЕ требуется (кроме impact_load, который у десктопа тоже best-effort из этого
+    // же bulk-ответа per _EF_CONFOUND_FIELD_CANDIDATES, а НЕ из отдельного detail-запроса, если
+    // detail не запрашивается отдельно; апк тоже ограничивается bulk-ответом).
+    private fun deepFindKey(element: JsonElement, keyName: String, depth: Int = 0): JsonPrimitive? {
+        if (depth > 6) return null
+        when (element) {
+            is JsonObject -> {
+                for ((k, v) in element) {
+                    if (k.equals(keyName, ignoreCase = true) && v is JsonPrimitive) return v
+                }
+                for (v in element.values) {
+                    val found = deepFindKey(v, keyName, depth + 1)
+                    if (found != null) return found
+                }
+            }
+            is JsonArray -> {
+                for (item in element.take(3)) {
+                    val found = deepFindKey(item, keyName, depth + 1)
+                    if (found != null) return found
+                }
+            }
+            else -> {}
+        }
+        return null
+    }
+
+    private fun firstPresent(act: JsonObject, keys: List<String>): JsonPrimitive? {
+        for (k in keys) {
+            val v = deepFindKey(act, k)
+            if (v != null) return v
+        }
+        return null
+    }
+
+    private val EF_CONFOUND_FIELD_CANDIDATES: Map<String, List<String>> = mapOf(
+        "elevation_gain_m" to listOf("elevationGain", "elevationGainInMeter", "elevationGainMeters"),
+        "elevation_loss_m" to listOf("elevationLoss", "elevationLossInMeter", "elevationLossMeters"),
+        "min_temperature" to listOf("minTemperature", "minTemp"),
+        "max_temperature" to listOf("maxTemperature", "maxTemp"),
+        "avg_cadence_spm" to listOf("averageRunningCadenceInStepsPerMinute", "avgRunCadence", "averageBikingCadenceInRevPerMinute"),
+        "avg_stride_length_mm" to listOf("avgStrideLength", "averageStrideLength"),
+        "calories" to listOf("calories"),
+        "aerobic_training_effect" to listOf("aerobicTrainingEffect"),
+        "anaerobic_training_effect" to listOf("anaerobicTrainingEffect"),
+        "manual_activity" to listOf("manualActivity", "manual"),
+        "elevation_corrected" to listOf("elevationCorrected"),
+        "water_estimated_ml" to listOf("waterEstimated"),
+        "impact_load" to listOf("impactLoad"),
+        "activity_training_load" to listOf("activityTrainingLoad"),
+        "difference_body_battery" to listOf("differenceBodyBattery"),
+        "moderate_intensity_min" to listOf("moderateIntensityMinutes"),
+        "vigorous_intensity_min" to listOf("vigorousIntensityMinutes"),
+        "hr_time_in_zone_1" to listOf("hrTimeInZone_1"),
+        "hr_time_in_zone_2" to listOf("hrTimeInZone_2"),
+        "hr_time_in_zone_3" to listOf("hrTimeInZone_3"),
+        "hr_time_in_zone_4" to listOf("hrTimeInZone_4"),
+        "hr_time_in_zone_5" to listOf("hrTimeInZone_5")
+    )
+
+    /** Порт extract_ef_confounds() — набор confound-полей EF для одной активности из bulk-JSON. */
+    private data class EfConfounds(
+        val elevationGainM: Double?, val elevationLossM: Double?, val avgTemperatureC: Double?,
+        val avgCadenceSpm: Double?, val avgStrideLengthM: Double?, val calories: Double?,
+        val aerobicTrainingEffect: Double?, val anaerobicTrainingEffect: Double?,
+        val manualActivity: Boolean?, val elevationCorrected: Boolean?,
+        val waterEstimatedMl: Double?, val impactLoad: Double?, val activityTrainingLoad: Double?,
+        val differenceBodyBattery: Int?, val moderateIntensityMin: Double?, val vigorousIntensityMin: Double?,
+        val hrZone1: Double?, val hrZone2: Double?, val hrZone3: Double?, val hrZone4: Double?, val hrZone5: Double?
+    )
+
+    private fun extractEfConfounds(act: JsonObject): EfConfounds {
+        fun d(key: String): Double? = firstPresent(act, EF_CONFOUND_FIELD_CANDIDATES.getValue(key))?.doubleOrNull
+        fun boolLike(key: String): Boolean? {
+            val v = firstPresent(act, EF_CONFOUND_FIELD_CANDIDATES.getValue(key)) ?: return null
+            return v.booleanOrNull ?: ((v.doubleOrNull ?: 0.0) != 0.0)
+        }
+        val elevationGainM = d("elevation_gain_m")?.let { Math.round(it * 10) / 10.0 }
+        val elevationLossM = d("elevation_loss_m")?.let { Math.round(it * 10) / 10.0 }
+        val temps = listOfNotNull(d("min_temperature"), d("max_temperature"))
+        val avgTemperatureC = if (temps.isNotEmpty()) Math.round(temps.average() * 10) / 10.0 else null
+        val avgCadenceSpm = d("avg_cadence_spm")?.let { Math.round(it * 10) / 10.0 }
+        val strideRaw = d("avg_stride_length_mm")
+        val avgStrideLengthM = strideRaw?.let {
+            if (it > 5) Math.round(it / 1000.0 * 1000) / 1000.0 else Math.round(it * 1000) / 1000.0
+        }
+        val calories = d("calories")?.let { Math.round(it).toDouble() }
+        val differenceBodyBattery = d("difference_body_battery")?.let { Math.round(it).toInt() }
+        return EfConfounds(
+            elevationGainM = elevationGainM, elevationLossM = elevationLossM, avgTemperatureC = avgTemperatureC,
+            avgCadenceSpm = avgCadenceSpm, avgStrideLengthM = avgStrideLengthM, calories = calories,
+            aerobicTrainingEffect = d("aerobic_training_effect"), anaerobicTrainingEffect = d("anaerobic_training_effect"),
+            manualActivity = boolLike("manual_activity"), elevationCorrected = boolLike("elevation_corrected"),
+            waterEstimatedMl = d("water_estimated_ml"), impactLoad = d("impact_load"),
+            activityTrainingLoad = d("activity_training_load"), differenceBodyBattery = differenceBodyBattery,
+            moderateIntensityMin = d("moderate_intensity_min"), vigorousIntensityMin = d("vigorous_intensity_min"),
+            hrZone1 = d("hr_time_in_zone_1"), hrZone2 = d("hr_time_in_zone_2"), hrZone3 = d("hr_time_in_zone_3"),
+            hrZone4 = d("hr_time_in_zone_4"), hrZone5 = d("hr_time_in_zone_5")
+        )
+    }
+
     private fun toActivityRow(act: JsonObject): ActivityRow? {
         val activityId = act["activityId"]?.jsonPrimitive?.longOrNull ?: return null
         val startLocal = act["startTimeLocal"]?.jsonPrimitive?.contentOrNull ?: return null
@@ -157,6 +267,7 @@ class GarminActivitiesApi(
         val avgSpeed = act["averageSpeed"]?.jsonPrimitive?.doubleOrNull
         val pace = sPerKm(avgSpeed) ?: if (distance != null && duration != null && distance > 0)
             duration / (distance / 1000.0) else null
+        val confounds = extractEfConfounds(act)
         return ActivityRow(
             activityId = activityId,
             date = date,
@@ -167,7 +278,28 @@ class GarminActivitiesApi(
             avgHr = avgHr,
             maxHr = maxHr,
             avgPaceSPerKm = pace,
-            typeGuess = null // классификация — отдельным проходом, см. classifyAll() (нужен общий rest/max HR периода)
+            typeGuess = null, // классификация — отдельным проходом, см. classifyAll() (нужен общий rest/max HR периода)
+            elevationGainM = confounds.elevationGainM,
+            elevationLossM = confounds.elevationLossM,
+            avgTemperatureC = confounds.avgTemperatureC,
+            avgCadenceSpm = confounds.avgCadenceSpm,
+            avgStrideLengthM = confounds.avgStrideLengthM,
+            calories = confounds.calories,
+            aerobicTrainingEffect = confounds.aerobicTrainingEffect,
+            anaerobicTrainingEffect = confounds.anaerobicTrainingEffect,
+            manualActivity = confounds.manualActivity,
+            elevationCorrected = confounds.elevationCorrected,
+            waterEstimatedMl = confounds.waterEstimatedMl,
+            impactLoad = confounds.impactLoad,
+            activityTrainingLoad = confounds.activityTrainingLoad,
+            differenceBodyBattery = confounds.differenceBodyBattery,
+            moderateIntensityMin = confounds.moderateIntensityMin,
+            vigorousIntensityMin = confounds.vigorousIntensityMin,
+            hrTimeInZone1 = confounds.hrZone1,
+            hrTimeInZone2 = confounds.hrZone2,
+            hrTimeInZone3 = confounds.hrZone3,
+            hrTimeInZone4 = confounds.hrZone4,
+            hrTimeInZone5 = confounds.hrZone5
         )
     }
 
@@ -219,6 +351,148 @@ class GarminActivitiesApi(
             null
         }
     }
+
+    // ===== Порт fetch_sleep_day/fetch_stress_day/fetch_training_readiness_day/
+    // fetch_body_battery_range/fetch_wellness_day из garmin_activities_export.py (~339-590) —
+    // остальные wellness-конфаунды (сон по стадиям/SpO2/стресс/body battery/training readiness/
+    // шаги/floors_ascended), которых раньше не было вообще ни в схеме, ни в коде. Каждый —
+    // отдельный HTTP GET, как и в десктопе (Гармин не отдаёт их одним общим ответом).
+
+    private fun safeGetJsonObject(tokens: GarminTokens, path: String): JsonObject? {
+        return try {
+            val resp = auth.connectApi(tokens, path)
+            if (!resp.isSuccessful) { resp.close(); return null }
+            val text = bodyOf(resp)
+            runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Порт fetch_sleep_day(): стадии сна + независимые физиологические сигналы (SpO2 во сне,
+     * стресс во сне, отклонение температуры кожи, RHR по данным сна, categorical training
+     * feedback). Пустая карта, если сна за эту дату нет вообще (sleepTimeSeconds отсутствует). */
+    private fun fetchSleepDay(tokens: GarminTokens, username: String, date: String): Map<String, Any?> {
+        val data = safeGetJsonObject(tokens, "/wellness-service/wellness/dailySleepData/$username?date=$date&nonSleepBufferMinutes=60")
+            ?: return emptyMap()
+        val dto = data["dailySleepDTO"]?.jsonObject ?: return emptyMap()
+        val sleepTimeS = dto["sleepTimeSeconds"]?.jsonPrimitive?.doubleOrNull
+        if (sleepTimeS == null || sleepTimeS == 0.0) return emptyMap()
+        val overall = dto["sleepScores"]?.jsonObject?.get("overall")?.jsonObject
+        val sleepNeed = dto["sleepNeed"]?.jsonObject
+        return mapOf(
+            "sleep_score" to overall?.get("value")?.jsonPrimitive?.intOrNull,
+            "sleep_duration_s" to sleepTimeS,
+            "sleep_deep_s" to dto["deepSleepSeconds"]?.jsonPrimitive?.doubleOrNull,
+            "sleep_light_s" to dto["lightSleepSeconds"]?.jsonPrimitive?.doubleOrNull,
+            "sleep_rem_s" to dto["remSleepSeconds"]?.jsonPrimitive?.doubleOrNull,
+            "sleep_awake_s" to dto["awakeSleepSeconds"]?.jsonPrimitive?.doubleOrNull,
+            "sleep_avg_resp" to (data["avgSleepRespirationValue"] ?: dto["averageRespirationValue"])?.jsonPrimitive?.doubleOrNull,
+            "avg_sleep_stress" to dto["avgSleepStress"]?.jsonPrimitive?.doubleOrNull,
+            "sleep_spo2_avg" to dto["averageSpO2Value"]?.jsonPrimitive?.doubleOrNull,
+            "sleep_spo2_min" to dto["lowestSpO2Value"]?.jsonPrimitive?.intOrNull,
+            "sleep_rhr" to data["restingHeartRate"]?.jsonPrimitive?.intOrNull,
+            "skin_temp_deviation_c" to data["avgSkinTempDeviationC"]?.jsonPrimitive?.doubleOrNull,
+            "sleep_training_feedback" to sleepNeed?.get("trainingFeedback")?.jsonPrimitive?.contentOrNull
+        )
+    }
+
+    /** Порт fetch_daily_summary_day(): RHR/шаги/калории + разбивка дневного стресса
+     * (rest/activity/uncategorized, low/medium/high) + floorsAscended — один и тот же запрос,
+     * что fetchDailySummary() уже делает для RHR/HRV в старом коде, здесь просто читаем
+     * дополнительные поля из того же JsonObject. */
+    private fun dailySummaryWellnessFields(daily: JsonObject?): Map<String, Any?> {
+        if (daily == null) return emptyMap()
+        return mapOf(
+            "rhr" to daily["restingHeartRate"]?.jsonPrimitive?.intOrNull,
+            "steps" to daily["totalSteps"]?.jsonPrimitive?.intOrNull,
+            "active_calories" to daily["activeKilocalories"]?.jsonPrimitive?.intOrNull,
+            "floors_ascended" to daily["floorsAscended"]?.jsonPrimitive?.doubleOrNull,
+            "stress_rest_s" to daily["restStressDuration"]?.jsonPrimitive?.doubleOrNull,
+            "stress_activity_s" to daily["activityStressDuration"]?.jsonPrimitive?.doubleOrNull,
+            "stress_uncategorized_s" to daily["uncategorizedStressDuration"]?.jsonPrimitive?.doubleOrNull,
+            "stress_low_s" to daily["lowStressDuration"]?.jsonPrimitive?.doubleOrNull,
+            "stress_medium_s" to daily["mediumStressDuration"]?.jsonPrimitive?.doubleOrNull,
+            "stress_high_s" to daily["highStressDuration"]?.jsonPrimitive?.doubleOrNull
+        )
+    }
+
+    /** Порт fetch_stress_day(): среднее/макс. значение стресса за день (0..100, шкала Гармин). */
+    private fun fetchStressDay(tokens: GarminTokens, date: String): Map<String, Any?> {
+        val data = safeGetJsonObject(tokens, "/wellness-service/wellness/dailyStress/$date") ?: return emptyMap()
+        return mapOf(
+            "stress_avg" to data["avgStressLevel"]?.jsonPrimitive?.intOrNull,
+            "stress_max" to data["maxStressLevel"]?.jsonPrimitive?.intOrNull
+        )
+    }
+
+    /** Порт fetch_training_readiness_day(): ответ — список (обычно из одного элемента) или
+     * объект напрямую, в зависимости от версии эндпоинта — берём первый элемент, если список. */
+    private fun fetchTrainingReadinessDay(tokens: GarminTokens, date: String): Map<String, Any?> {
+        return try {
+            val resp = auth.connectApi(tokens, "/metrics-service/metrics/trainingreadiness/$date")
+            if (!resp.isSuccessful) { resp.close(); return emptyMap() }
+            val text = bodyOf(resp)
+            val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() ?: return emptyMap()
+            val row = when {
+                root is kotlinx.serialization.json.JsonArray -> root.firstOrNull()?.jsonObject
+                root is JsonObject -> root
+                else -> null
+            } ?: return emptyMap()
+            mapOf(
+                "training_readiness_score" to row["score"]?.jsonPrimitive?.intOrNull,
+                "training_readiness_level" to row["level"]?.jsonPrimitive?.contentOrNull
+            )
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    private data class BodyBatteryDay(
+        val min: Int?, val max: Int?, val charged: Int?, val drained: Int?
+    )
+
+    /** Порт fetch_body_battery_range(): в отличие от остальных wellness-метрик отдаётся
+     * ДИАПАЗОНОМ за один запрос — бьём на кусочки по 28 дней (то же неофициальное ограничение
+     * ширины окна, что и в десктопе). */
+    private fun fetchBodyBatteryRange(tokens: GarminTokens, startDate: LocalDate, endDate: LocalDate): Map<String, BodyBatteryDay> {
+        val out = mutableMapOf<String, BodyBatteryDay>()
+        var cur = startDate
+        while (!cur.isAfter(endDate)) {
+            val chunkEnd = minOf(cur.plusDays(27), endDate)
+            try {
+                val resp = auth.connectApi(
+                    tokens,
+                    "/wellness-service/wellness/bodyBattery/reports/daily?startDate=$cur&endDate=$chunkEnd"
+                )
+                if (resp.isSuccessful) {
+                    val text = bodyOf(resp)
+                    val arr = runCatching { Json.parseToJsonElement(text).jsonArray }.getOrNull()
+                    arr?.forEach { el ->
+                        val row = el.jsonObject
+                        val d = (row["date"] ?: row["calendarDate"])?.jsonPrimitive?.contentOrNull ?: return@forEach
+                        val values = row["bodyBatteryValuesArray"]?.jsonArray?.mapNotNull { pair ->
+                            val p = pair.jsonArray
+                            if (p.size > 1) p[1].jsonPrimitive.doubleOrNull else null
+                        } ?: emptyList()
+                        out[d] = BodyBatteryDay(
+                            min = values.minOrNull()?.let { Math.round(it).toInt() },
+                            max = values.maxOrNull()?.let { Math.round(it).toInt() },
+                            charged = row["charged"]?.jsonPrimitive?.intOrNull,
+                            drained = row["drained"]?.jsonPrimitive?.intOrNull
+                        )
+                    }
+                } else {
+                    resp.close()
+                }
+            } catch (e: Exception) {
+                // best-effort — пропускаем кусок, остальные пробуем
+            }
+            cur = chunkEnd.plusDays(1)
+        }
+        return out
+    }
+
 
     /**
      * Грубый фолбэк-классификатор — используется, только если лапы не пришли вообще (см.
@@ -424,6 +698,17 @@ class GarminActivitiesApi(
                         } ?: (el as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
                     }
                     if (typeKey.isNullOrBlank()) typeKey = lap["intensityType"]?.jsonPrimitive?.contentOrNull
+                    // Беговая динамика по кругу — порт normalize_lap() из
+                    // garmin_activities_export.py (~813-847): сырьё для compute_lap_drift(),
+                    // те же поля уже присутствуют в этом же JSON-объекте лапа, доп. запросов не
+                    // требуется.
+                    val cadence = lap["averageRunCadence"]?.jsonPrimitive?.doubleOrNull
+                    val gctMs = lap["groundContactTime"]?.jsonPrimitive?.doubleOrNull
+                    val vertOscMm = lap["verticalOscillation"]?.jsonPrimitive?.doubleOrNull
+                    val vertRatio = lap["verticalRatio"]?.jsonPrimitive?.doubleOrNull
+                    val strideMm = lap["strideLength"]?.jsonPrimitive?.doubleOrNull
+                    val avgResp = lap["avgRespirationRate"]?.jsonPrimitive?.doubleOrNull
+                    val compliance = lap["directWorkoutComplianceScore"]?.jsonPrimitive?.doubleOrNull?.let { Math.round(it).toInt() }
                     IntervalRow(
                         idx = idx,
                         lapType = typeKey?.uppercase(),
@@ -431,7 +716,14 @@ class GarminActivitiesApi(
                         distanceM = dist?.let { Math.round(it * 10) / 10.0 },
                         avgHr = avgHr,
                         maxHr = maxHr,
-                        avgPaceSPerKm = pace
+                        avgPaceSPerKm = pace,
+                        avgCadenceSpm = cadence?.let { Math.round(it * 10) / 10.0 },
+                        groundContactTimeMs = gctMs?.let { Math.round(it * 10) / 10.0 },
+                        verticalOscillationMm = vertOscMm?.let { Math.round(it * 10) / 10.0 },
+                        verticalRatio = vertRatio?.let { Math.round(it * 100) / 100.0 },
+                        strideLengthMm = strideMm?.let { Math.round(it * 10) / 10.0 },
+                        avgRespirationRate = avgResp?.let { Math.round(it * 10) / 10.0 },
+                        workoutComplianceScore = compliance
                     )
                 }
             } catch (e: Exception) {
@@ -441,6 +733,34 @@ class GarminActivitiesApi(
         return tryEndpoint("/activity-service/activity/$activityId/typedsplits")
             ?: tryEndpoint("/activity-service/activity/$activityId/splits")
             ?: emptyList()
+    }
+
+    /** Порт compute_lap_drift() из garmin_activities_export.py (~851-882) — внутритренировочный
+     * дрейф беговой динамики: сравнивает первую и последнюю треть "рабочих" лапов (duration_s>0,
+     * avg_cadence_spm известен) по каденсу/GCT/вертикальным колебаниям. null, если таких лапов
+     * меньше 6 (слишком мало данных) — не ошибка, просто сигнал не считается для этой тренировки. */
+    private data class LapDrift(val cadenceDriftPct: Double?, val gctDriftPct: Double?, val verticalOscDriftPct: Double?)
+
+    private fun computeLapDrift(laps: List<IntervalRow>): LapDrift? {
+        val active = laps.filter { (it.durationS ?: 0.0) > 0.0 }
+        val withDynamics = active.filter { it.avgCadenceSpm != null }
+        if (withDynamics.size < 6) return null
+        val third = maxOf(2, withDynamics.size / 3)
+        val first = withDynamics.take(third)
+        val last = withDynamics.takeLast(third)
+        fun pctChange(sel: (IntervalRow) -> Double?): Double? {
+            val a = first.mapNotNull(sel)
+            val b = last.mapNotNull(sel)
+            if (a.isEmpty() || b.isEmpty()) return null
+            val avgA = a.average(); val avgB = b.average()
+            if (avgA == 0.0) return null
+            return Math.round((avgB - avgA) / avgA * 100.0 * 10) / 10.0
+        }
+        return LapDrift(
+            cadenceDriftPct = pctChange { it.avgCadenceSpm },
+            gctDriftPct = pctChange { it.groundContactTimeMs },
+            verticalOscDriftPct = pctChange { it.verticalOscillationMm }
+        )
     }
 
     /** Суммарный набор высоты активности (м) — прямо из bulk-списка активностей (поле
@@ -624,7 +944,12 @@ class GarminActivitiesApi(
         withWellness: Boolean,
         forceRefreshWellness: Boolean = false,
         wellnessDelayMs: Long = 150,
-        lapsDelayMs: Long = 120
+        lapsDelayMs: Long = 120,
+        // Прогресс (0..100) для UI/уведомления foreground-сервиса - по умолчанию no-op, чтобы
+        // не трогать другие вызовы этого метода. Считается по числу "единиц работы" (беговые
+        // активности + дни самочувствия, если withWellness), а не по времени, т.к. время одного
+        // запроса плавает.
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }
     ): ImportResult {
         log("Период: $startDate .. $endDate")
         val rawAll = fetchAllActivities(tokens, startDate.toString(), endDate.toString())
@@ -659,6 +984,9 @@ class GarminActivitiesApi(
         val hrZones = estimateRealHrZones(db, maxHrObs) ?: estimateHrZones(restHr, maxHrObs)
         var lapsFetched = 0
         var gapFetched = 0
+        val wellnessDaysTotal = if (withWellness) (java.time.temporal.ChronoUnit.DAYS.between(startDate, endDate) + 1).toInt() else 0
+        val progressTotal = rows.size + wellnessDaysTotal
+        var progressDone = 0
         for (r in rows) {
             // Лапы — как в garmin_activities_export.py: тянем ПО КАЖДОЙ активности отдельным
             // запросом (typedsplits → splits), поэтому классификация точнее грубой эвристики
@@ -696,7 +1024,19 @@ class GarminActivitiesApi(
             // одному среднему пульсу за тренировку.
             val typeGuess = if (byLaps != "unknown") byLaps
                 else classify(r.durationS, r.avgHr, restHrObs, maxHrObs)
-            db.upsertActivity(r.copy(typeGuess = typeGuess, avgGapSPerKm = avgGap), exportedAt)
+            val drift = if (laps.isNotEmpty()) computeLapDrift(laps) else null
+            db.upsertActivity(
+                r.copy(
+                    typeGuess = typeGuess,
+                    avgGapSPerKm = avgGap,
+                    cadenceDriftPct = drift?.cadenceDriftPct,
+                    gctDriftPct = drift?.gctDriftPct,
+                    verticalOscDriftPct = drift?.verticalOscDriftPct
+                ),
+                exportedAt
+            )
+            progressDone++
+            onProgress(progressDone, progressTotal)
             if (lapsDelayMs > 0) Thread.sleep(lapsDelayMs)
         }
         log("Сохранено/обновлено в базе: ${rows.size} (лапы получены для $lapsFetched, GAP посчитан для $gapFetched)")
@@ -710,28 +1050,85 @@ class GarminActivitiesApi(
         if (withWellness) {
             val username = resolveDisplayName(tokens)
             if (username == null) {
-                log("Не удалось определить displayName Garmin — самочувствие (RHR/HRV) пропущено.")
+                log("Не удалось определить displayName Garmin — самочувствие пропущено.")
             } else {
                 // Дни, за которые самочувствие уже есть в базе, по умолчанию пропускаем (быстрее
                 // при повторных запусках) — как --force-refresh-wellness в garmin_activities_export.py.
                 val already = if (forceRefreshWellness) emptySet() else db.wellnessDatesSince(startDate.toString())
+                // Body Battery отдаётся диапазоном за один запрос (как в десктопе) — тянем один
+                // раз на весь период ДО дневного цикла, а не по дню.
+                val bodyBatteryByDate = try {
+                    fetchBodyBatteryRange(tokens, startDate, endDate)
+                } catch (e: Exception) {
+                    emptyMap()
+                }
                 var d = startDate
                 while (!d.isAfter(endDate)) {
                     val dateStr = d.toString()
                     if (dateStr !in already) {
-                        val daily = fetchDailySummary(tokens, username, dateStr)
+                        val sleep = fetchSleepDay(tokens, username, dateStr)
                         val hrv = fetchHrv(tokens, dateStr)
-                        val restingHr = daily?.get("restingHeartRate")?.jsonPrimitive?.intOrNull
-                        val hrvAvg = hrv?.get("hrvSummary")?.jsonObject?.get("lastNightAvg")?.jsonPrimitive?.doubleOrNull
-                        if (restingHr != null || hrvAvg != null) {
-                            db.upsertWellness(WellnessRow(dateStr, restingHr, hrvAvg, null), exportedAt)
+                        val hrvSummary = hrv?.get("hrvSummary")?.jsonObject
+                        val daily = fetchDailySummary(tokens, username, dateStr)
+                        val dailyFields = dailySummaryWellnessFields(daily)
+                        val stress = fetchStressDay(tokens, dateStr)
+                        val readiness = fetchTrainingReadinessDay(tokens, dateStr)
+                        val bb = bodyBatteryByDate[dateStr]
+
+                        val rhr = (dailyFields["rhr"] as? Int) ?: (sleep["sleep_rhr"] as? Int)
+                        val hrvAvg = hrvSummary?.get("lastNightAvg")?.jsonPrimitive?.doubleOrNull
+                        val anyData = rhr != null || hrvAvg != null || sleep.isNotEmpty() ||
+                            stress.isNotEmpty() || readiness.isNotEmpty() || bb != null
+                        if (anyData) {
+                            db.upsertWellness(
+                                WellnessRow(
+                                    date = dateStr,
+                                    sleepScore = sleep["sleep_score"] as? Int,
+                                    sleepDurationS = sleep["sleep_duration_s"] as? Double,
+                                    sleepDeepS = sleep["sleep_deep_s"] as? Double,
+                                    sleepLightS = sleep["sleep_light_s"] as? Double,
+                                    sleepRemS = sleep["sleep_rem_s"] as? Double,
+                                    sleepAwakeS = sleep["sleep_awake_s"] as? Double,
+                                    sleepAvgResp = sleep["sleep_avg_resp"] as? Double,
+                                    hrvLastNightAvg = hrvAvg,
+                                    hrvWeeklyAvg = hrvSummary?.get("weeklyAvg")?.jsonPrimitive?.doubleOrNull,
+                                    hrvStatus = hrvSummary?.get("status")?.jsonPrimitive?.contentOrNull,
+                                    rhr = rhr,
+                                    bodyBatteryMin = bb?.min,
+                                    bodyBatteryMax = bb?.max,
+                                    bodyBatteryCharged = bb?.charged,
+                                    bodyBatteryDrained = bb?.drained,
+                                    stressAvg = stress["stress_avg"] as? Int,
+                                    stressMax = stress["stress_max"] as? Int,
+                                    trainingReadinessScore = readiness["training_readiness_score"] as? Int,
+                                    trainingReadinessLevel = readiness["training_readiness_level"] as? String,
+                                    steps = dailyFields["steps"] as? Int,
+                                    activeCalories = dailyFields["active_calories"] as? Int,
+                                    avgSleepStress = sleep["avg_sleep_stress"] as? Double,
+                                    sleepSpo2Avg = sleep["sleep_spo2_avg"] as? Double,
+                                    sleepSpo2Min = sleep["sleep_spo2_min"] as? Int,
+                                    sleepRhr = sleep["sleep_rhr"] as? Int,
+                                    skinTempDeviationC = sleep["skin_temp_deviation_c"] as? Double,
+                                    sleepTrainingFeedback = sleep["sleep_training_feedback"] as? String,
+                                    floorsAscended = dailyFields["floors_ascended"] as? Double,
+                                    stressRestS = dailyFields["stress_rest_s"] as? Double,
+                                    stressActivityS = dailyFields["stress_activity_s"] as? Double,
+                                    stressUncategorizedS = dailyFields["stress_uncategorized_s"] as? Double,
+                                    stressLowS = dailyFields["stress_low_s"] as? Double,
+                                    stressMediumS = dailyFields["stress_medium_s"] as? Double,
+                                    stressHighS = dailyFields["stress_high_s"] as? Double
+                                ),
+                                exportedAt
+                            )
                             wellnessDays++
                         }
                         if (wellnessDelayMs > 0) Thread.sleep(wellnessDelayMs)
                     }
+                    progressDone++
+                    onProgress(progressDone, progressTotal)
                     d = d.plusDays(1)
                 }
-                log("Самочувствие (RHR/HRV) сохранено/обновлено за $wellnessDays дн.")
+                log("Самочувствие сохранено/обновлено за $wellnessDays дн.")
             }
         }
         return ImportResult(rows.size, wellnessDays)

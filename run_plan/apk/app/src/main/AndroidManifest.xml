@@ -12,6 +12,12 @@
     <!-- Нужно для автообновления (ApkUpdater): позволяет проверить canRequestPackageInstalls()
          и корректно запускает системный установщик при скачивании apk с бэка (см. UpdateDialog). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Foreground-сервис для импорта тренировок/автообновления/сборки отчёта (см.
+         service/AnalyticsImportService.kt) - без него Android прерывал загрузку при
+         сворачивании приложения/блокировке экрана. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -33,6 +39,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".service.AnalyticsImportService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

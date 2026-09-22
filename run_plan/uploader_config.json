@@ -1,0 +1,13 @@
+{
+  "last_account": "ystef11@gmail.com",
+  "dbs": {
+    "ystef11@gmail.com": "D:\\Git\\mytest\\garmin\\run_plan\\garmin_running_ystef.db"
+  },
+  "last_upload_account": "Garmin - yurlovama@gmail.com",
+  "intervals_accounts": {
+    "test": {
+      "key": "23423424",
+      "athlete": "324234234"
+    }
+  }
+}
