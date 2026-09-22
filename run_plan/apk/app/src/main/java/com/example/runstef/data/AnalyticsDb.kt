@@ -51,7 +51,8 @@ data class ActivityRow(
     val cadenceDriftPct: Double? = null,
     val gctDriftPct: Double? = null,
     val verticalOscDriftPct: Double? = null,
-    val avgGapSPerKm: Double? = null
+    val avgGapSPerKm: Double? = null,
+    val avgDeviceTemperatureC: Double? = null
 )
 
 /**
@@ -94,7 +95,9 @@ data class WellnessRow(
     val stressUncategorizedS: Double? = null,
     val stressLowS: Double? = null,
     val stressMediumS: Double? = null,
-    val stressHighS: Double? = null
+    val stressHighS: Double? = null,
+    val sleepStartLocal: String? = null,
+    val sleepEndLocal: String? = null
 )
 
 /** Кросс-тренировка (вело/лыжи/плавание/силовая) — порт cross_activities из
@@ -154,7 +157,10 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         // v6: ПОЛНЫЙ репаритет схемы с десктопом (activities/intervals/wellness) — добавлены все
         // confound-колонки, wellness.resting_hr переименован в rhr (пересоздание таблицы, т.к.
         // ALTER TABLE RENAME COLUMN ненадёжен на minSdk=28).
-        const val DB_VERSION = 6
+        // v7: activities.avg_device_temperature_c (fetch_device_temperature, отдельно от
+        // avg_temperature_c), wellness.sleep_start_local/sleep_end_local — все три были в
+        // десктопной схеме, но отсутствовали в apk.
+        const val DB_VERSION = 7
 
         fun dirFor(context: Context): File = File(context.filesDir, "analytics").apply { mkdirs() }
 
@@ -215,6 +221,7 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
                 gct_drift_pct REAL,
                 vertical_osc_drift_pct REAL,
                 avg_grade_adjusted_pace_s_per_km REAL,
+                avg_device_temperature_c REAL,
                 exported_at TEXT
             )
         """
@@ -278,6 +285,8 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
                 stress_low_s REAL,
                 stress_medium_s REAL,
                 stress_high_s REAL,
+                sleep_start_local TEXT,
+                sleep_end_local TEXT,
                 exported_at TEXT
             )
         """
@@ -406,6 +415,11 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
             )
             db.execSQL("DROP TABLE wellness_old_v6")
         }
+        if (oldVersion < 7) {
+            runCatching { db.execSQL("ALTER TABLE activities ADD COLUMN avg_device_temperature_c REAL") }
+            runCatching { db.execSQL("ALTER TABLE wellness ADD COLUMN sleep_start_local TEXT") }
+            runCatching { db.execSQL("ALTER TABLE wellness ADD COLUMN sleep_end_local TEXT") }
+        }
     }
 
     fun upsertActivity(a: ActivityRow, exportedAtIso: String) {
@@ -448,6 +462,7 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
             a.gctDriftPct?.let { put("gct_drift_pct", it) } ?: putNull("gct_drift_pct")
             a.verticalOscDriftPct?.let { put("vertical_osc_drift_pct", it) } ?: putNull("vertical_osc_drift_pct")
             a.avgGapSPerKm?.let { put("avg_grade_adjusted_pace_s_per_km", it) } ?: putNull("avg_grade_adjusted_pace_s_per_km")
+            a.avgDeviceTemperatureC?.let { put("avg_device_temperature_c", it) } ?: putNull("avg_device_temperature_c")
             put("exported_at", exportedAtIso)
         }
         writableDatabase.insertWithOnConflict("activities", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
@@ -490,6 +505,8 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
             w.stressLowS?.let { put("stress_low_s", it) } ?: putNull("stress_low_s")
             w.stressMediumS?.let { put("stress_medium_s", it) } ?: putNull("stress_medium_s")
             w.stressHighS?.let { put("stress_high_s", it) } ?: putNull("stress_high_s")
+            put("sleep_start_local", w.sleepStartLocal)
+            put("sleep_end_local", w.sleepEndLocal)
             put("exported_at", exportedAtIso)
         }
         writableDatabase.insertWithOnConflict("wellness", null, cv, SQLiteDatabase.CONFLICT_REPLACE)

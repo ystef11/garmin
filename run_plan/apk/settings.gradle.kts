@@ -9,6 +9,7 @@ pluginManagement {
         }
         mavenCentral()
         gradlePluginPortal()
+        maven("https://chaquo.com/maven")
     }
 }
 plugins {
@@ -19,9 +20,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven("https://chaquo.com/maven")
     }
 }
 
 rootProject.name = "runstef"
 include(":app")
- 

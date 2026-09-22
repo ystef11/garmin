@@ -50,9 +50,6 @@ class GarminActivitiesApi(
         private val OUTDOOR_RUN_TYPE_KEYS = RUN_TYPE_KEYS - setOf(
             "treadmill_running", "indoor_running", "virtual_run"
         )
-        private val ELEVATION_GAIN_KEY_CANDIDATES = listOf(
-            "elevationGain", "elevationGainInMeter", "elevationGainMeters"
-        )
         private val GRADE_ADJUSTED_SPEED_KEY_CANDIDATES = listOf("directGradeAdjustedSpeed", "gradeAdjustedSpeed")
         private val GRADE_ADJUSTED_DISTANCE_KEY_CANDIDATES = listOf("sumDistance")
 
@@ -144,7 +141,8 @@ class GarminActivitiesApi(
 
     private fun sPerKm(speedMs: Double?): Double? {
         if (speedMs == null || speedMs <= 0.0) return null
-        return 1000.0 / speedMs
+        // Порт s_per_km() из garmin_activities_export.py — round(1000.0/speed_m_s, 1).
+        return Math.round(1000.0 / speedMs * 10) / 10.0
     }
 
     // ===== Порт _deep_find_key/_first_present/_EF_CONFOUND_FIELD_CANDIDATES/_extract_ef_confounds
@@ -223,7 +221,12 @@ class GarminActivitiesApi(
         val hrZone1: Double?, val hrZone2: Double?, val hrZone3: Double?, val hrZone4: Double?, val hrZone5: Double?
     )
 
-    private fun extractEfConfounds(act: JsonObject): EfConfounds {
+    private fun fahrenheitToCelsius(f: Double): Double = (f - 32.0) * 5.0 / 9.0
+
+    /** temperatureUnit — "c"/"f", порт --temperature-unit из garmin_activities_export.py:
+     * Garmin не документирует единицу temperature в ответе, она зависит от настроек аккаунта
+     * (см. _fahrenheit_to_celsius/_extract_ef_confounds, temperature_unit="c" по умолчанию). */
+    private fun extractEfConfounds(act: JsonObject, temperatureUnit: String = "c"): EfConfounds {
         fun d(key: String): Double? = firstPresent(act, EF_CONFOUND_FIELD_CANDIDATES.getValue(key))?.doubleOrNull
         fun boolLike(key: String): Boolean? {
             val v = firstPresent(act, EF_CONFOUND_FIELD_CANDIDATES.getValue(key)) ?: return null
@@ -232,7 +235,11 @@ class GarminActivitiesApi(
         val elevationGainM = d("elevation_gain_m")?.let { Math.round(it * 10) / 10.0 }
         val elevationLossM = d("elevation_loss_m")?.let { Math.round(it * 10) / 10.0 }
         val temps = listOfNotNull(d("min_temperature"), d("max_temperature"))
-        val avgTemperatureC = if (temps.isNotEmpty()) Math.round(temps.average() * 10) / 10.0 else null
+        val avgTemperatureC = if (temps.isNotEmpty()) {
+            val avgRaw = temps.average()
+            val celsius = if (temperatureUnit == "f") fahrenheitToCelsius(avgRaw) else avgRaw
+            Math.round(celsius * 10) / 10.0
+        } else null
         val avgCadenceSpm = d("avg_cadence_spm")?.let { Math.round(it * 10) / 10.0 }
         val strideRaw = d("avg_stride_length_mm")
         val avgStrideLengthM = strideRaw?.let {
@@ -267,10 +274,16 @@ class GarminActivitiesApi(
         val avgSpeed = act["averageSpeed"]?.jsonPrimitive?.doubleOrNull
         val pace = sPerKm(avgSpeed) ?: if (distance != null && duration != null && distance > 0)
             duration / (distance / 1000.0) else null
+        // Confound'ы здесь считаются ТОЛЬКО из bulk-ответа — предварительный проход (см.
+        // importRange), чтобы отдать список беговых строк ДО сетевого детейл-запроса на каждую
+        // активность. Финальные confound-поля (в т.ч. impact_load, который есть ТОЛЬКО в
+        // detail-объекте) пересчитываются и перезаписываются в importRange() после мержа с
+        // /activity-service/activity/{id} — см. extractEfConfounds(mergeActivityDetail(...)).
         val confounds = extractEfConfounds(act)
         return ActivityRow(
             activityId = activityId,
             date = date,
+            startTime = startLocal,
             name = name,
             sport = sportKey,
             durationS = duration,
@@ -393,8 +406,24 @@ class GarminActivitiesApi(
             "sleep_spo2_min" to dto["lowestSpO2Value"]?.jsonPrimitive?.intOrNull,
             "sleep_rhr" to data["restingHeartRate"]?.jsonPrimitive?.intOrNull,
             "skin_temp_deviation_c" to data["avgSkinTempDeviationC"]?.jsonPrimitive?.doubleOrNull,
-            "sleep_training_feedback" to sleepNeed?.get("trainingFeedback")?.jsonPrimitive?.contentOrNull
+            "sleep_training_feedback" to sleepNeed?.get("trainingFeedback")?.jsonPrimitive?.contentOrNull,
+            "sleep_start_local" to localMsToIso(dto["sleepStartTimestampLocal"]?.jsonPrimitive?.longOrNull),
+            "sleep_end_local" to localMsToIso(dto["sleepEndTimestampLocal"]?.jsonPrimitive?.longOrNull)
         )
+    }
+
+    /** Порт _local_ms_to_iso(): sleep{Start,End}TimestampLocal — эпоха в миллисекундах, где
+     * число уже закодировано как локальное время суток (Garmin представляет местное время так,
+     * будто оно UTC, без реального смещения) — поэтому конвертируем через UTC-эпоху, а не через
+     * системный часовой пояс устройства. */
+    private fun localMsToIso(ms: Long?): String? {
+        if (ms == null) return null
+        return try {
+            java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDateTime()
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+        } catch (e: Exception) {
+            null
+        }
     }
 
     /** Порт fetch_daily_summary_day(): RHR/шаги/калории + разбивка дневного стресса
@@ -667,7 +696,7 @@ class GarminActivitiesApi(
      * обычные авто/ручные (splits). Возвращает пустой список, если ни один эндпоинт не ответил
      * (например, старая/не-беговая активность) — classifyByLaps() в этом случае просто не
      * сработает и вызывающий код должен откатиться на грубый classify(). */
-    fun fetchLaps(tokens: GarminTokens, activityId: Long): List<IntervalRow> {
+    fun fetchLaps(tokens: GarminTokens, activityId: Long): Pair<List<IntervalRow>, String> {
         fun tryEndpoint(path: String): List<IntervalRow>? {
             return try {
                 val resp = auth.connectApi(tokens, path)
@@ -730,9 +759,9 @@ class GarminActivitiesApi(
                 null
             }
         }
-        return tryEndpoint("/activity-service/activity/$activityId/typedsplits")
-            ?: tryEndpoint("/activity-service/activity/$activityId/splits")
-            ?: emptyList()
+        tryEndpoint("/activity-service/activity/$activityId/typedsplits")?.let { return it to "typed" }
+        tryEndpoint("/activity-service/activity/$activityId/splits")?.let { return it to "plain" }
+        return emptyList<IntervalRow>() to "none"
     }
 
     /** Порт compute_lap_drift() из garmin_activities_export.py (~851-882) — внутритренировочный
@@ -763,15 +792,71 @@ class GarminActivitiesApi(
         )
     }
 
-    /** Суммарный набор высоты активности (м) — прямо из bulk-списка активностей (поле
-     * elevationGain/elevationGainInMeter/elevationGainMeters, в этом порядке приоритета — как
-     * в garmin_activities_export.py). null, если поля нет вообще (Garmin не всегда его отдаёт). */
-    private fun extractElevationGainM(act: JsonObject): Double? {
-        for (key in ELEVATION_GAIN_KEY_CANDIDATES) {
-            val v = act[key]?.jsonPrimitive?.doubleOrNull
-            if (v != null) return v
+    /** Порт detail-запроса из export() (garmin_activities_export.py:1678-1681): impactLoad (и
+     * потенциально другие будущие confound-поля) приходит ТОЛЬКО в detail-объекте
+     * /activity-service/activity/{id}, а не в bulk-списке активностей — см. комментарий у
+     * _EF_CONFOUND_FIELD_CANDIDATES/impact_load. Best-effort: недоступен -> null, не падает. */
+    private fun fetchActivityDetail(tokens: GarminTokens, activityId: Long): JsonObject? {
+        return try {
+            val resp = auth.connectApi(tokens, "/activity-service/activity/$activityId")
+            if (!resp.isSuccessful) { resp.close(); return null }
+            runCatching { Json.parseToJsonElement(bodyOf(resp)).jsonObject }.getOrNull()
+        } catch (e: Exception) {
+            null
         }
-        return null
+    }
+
+    /** confound_source = {**act, "_activity_detail": detail} из export() — detail НЕ
+     * затирает поля bulk-ответа, а кладётся отдельным вложенным ключом; deepFindKey ищет
+     * рекурсивно по всему дереву, поэтому порядок вложенности не важен для поиска. */
+    private fun mergeActivityDetail(act: JsonObject, detail: JsonObject?): JsonObject {
+        if (detail == null) return act
+        val merged = LinkedHashMap<String, JsonElement>(act)
+        merged["_activity_detail"] = detail
+        return JsonObject(merged)
+    }
+
+    private val DEVICE_TEMPERATURE_KEY_CANDIDATES = listOf("directAirTemperature", "directTemperature")
+
+    /** Порт fetch_device_temperature() из garmin_activities_export.py (~2069-2107): средняя
+     * температура с датчика часов (посекундный поток /details, отдельный от avg_temperature_c
+     * в EF-конфаундах, который берётся из сводки min/maxTemperature активности). Best-effort:
+     * эндпоинт недоступен/дескриптора нет/точки пустые -> null, не падает. */
+    fun fetchDeviceTemperature(tokens: GarminTokens, activityId: Long, maxChartSize: Int = 2000): Double? {
+        val details = try {
+            val resp = auth.connectApi(
+                tokens,
+                "/activity-service/activity/$activityId/details?maxChartSize=$maxChartSize&maxPolylineSize=$maxChartSize"
+            )
+            val text = bodyOf(resp)
+            if (!resp.isSuccessful) return null
+            runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
+        } catch (e: Exception) {
+            return null
+        }
+        val descriptors = details["metricDescriptors"]?.let { runCatching { it.jsonArray }.getOrNull() } ?: return null
+        var idxTemp: Int? = null
+        for (key in DEVICE_TEMPERATURE_KEY_CANDIDATES) {
+            for (d in descriptors) {
+                val obj = d as? JsonObject ?: continue
+                if (obj["key"]?.jsonPrimitive?.contentOrNull == key) {
+                    idxTemp = obj["metricsIndex"]?.jsonPrimitive?.intOrNull
+                    break
+                }
+            }
+            if (idxTemp != null) break
+        }
+        val idx = idxTemp ?: return null
+        val points = details["activityDetailMetrics"]?.let { runCatching { it.jsonArray }.getOrNull() } ?: emptyList()
+        val values = mutableListOf<Double>()
+        for (p in points) {
+            val obj = p as? JsonObject ?: continue
+            val metrics = obj["metrics"]?.let { runCatching { it.jsonArray }.getOrNull() } ?: continue
+            if (idx >= metrics.size) continue
+            metrics[idx].jsonPrimitive.doubleOrNull?.let { values.add(it) }
+        }
+        if (values.isEmpty()) return null
+        return Math.round(values.average() * 10) / 10.0
     }
 
     /**
@@ -992,16 +1077,26 @@ class GarminActivitiesApi(
             // запросом (typedsplits → splits), поэтому классификация точнее грубой эвристики
             // (classifyByLaps умеет отличать интервалы/порог/длинную/лёгкую по структуре
             // тренировки, а не только по среднему пульсу за всю тренировку целиком).
-            var laps = fetchLaps(tokens, r.activityId)
+            var (laps, lapSource) = fetchLaps(tokens, r.activityId)
+
+            // Detail-объект (/activity-service/activity/{id}) — порт export() (строки 1673-1682
+            // garmin_activities_export.py): impact_load и потенциально другие confound-поля
+            // приходят ТОЛЬКО оттуда, не из bulk-списка активностей. Confound'ы пересчитываются
+            // здесь (а не в toActivityRow) из смёрженного bulk+detail объекта, тем же значением
+            // elevation_gain_m, которое пишется в БД, — используется и как GAP-гейт ниже (в
+            // Python это одно и то же значение confounds["elevation_gain_m"] для обеих целей).
+            val act = rawById[r.activityId]
+            val detail = act?.let { fetchActivityDetail(tokens, r.activityId) }
+            val confoundSource = act?.let { mergeActivityDetail(it, detail) }
+            val confounds = confoundSource?.let { extractEfConfounds(it) }
 
             // GAP (grade-adjusted pace) — только для уличных беговых типов с заметным набором
             // высоты (порт условия из garmin_activities_export.py: OUTDOOR_RUN_TYPE_KEYS и
             // elevation_gain_m >= 30 м) — лишний поточный запрос на каждую активность иначе
             // тратился бы зря на дорожке/ровных пробежках.
             var avgGap: Double? = null
-            val act = rawById[r.activityId]
-            val elevationGainM = act?.let { extractElevationGainM(it) }
-            if (laps.isNotEmpty() && act != null && r.sport?.lowercase() in OUTDOOR_RUN_TYPE_KEYS &&
+            val elevationGainM = confounds?.elevationGainM
+            if (laps.isNotEmpty() && r.sport?.lowercase() in OUTDOOR_RUN_TYPE_KEYS &&
                 elevationGainM != null && elevationGainM >= 30.0
             ) {
                 val (overall, perLap) = fetchGradeAdjustedPaceByLap(tokens, r.activityId, laps)
@@ -1012,23 +1107,48 @@ class GarminActivitiesApi(
                 }
             }
 
+            // Температура с датчика часов — отдельный поточный запрос /details (порт
+            // fetch_device_temperature(), garmin_activities_export.py:2069-2107), как и в
+            // десктопе, безусловно для каждой активности (не гейтится уклоном/типом трассы).
+            val avgDeviceTemperatureC = fetchDeviceTemperature(tokens, r.activityId)
+
             if (laps.isNotEmpty()) {
                 db.replaceIntervals(r.activityId, laps)
                 lapsFetched++
             }
             val byLaps = if (laps.isNotEmpty()) classifyByLaps(r.durationS ?: 0.0, laps, hrZones) else "unknown"
-            // Категории те же, что и в десктопном classify(): long/interval/threshold/easy/mixed
-            // (см. AnalyticsReportBuilder — теперь умеет их все, а не только грубые
-            // long/quality/easy). "unknown" — лапов не было вовсе (старая тренировка без
-            // сохранённых сплитов, старые часы и т.п.) — тогда откат на грубый classify() по
-            // одному среднему пульсу за тренировку.
-            val typeGuess = if (byLaps != "unknown") byLaps
-                else classify(r.durationS, r.avgHr, restHrObs, maxHrObs)
+            // Порт reclassify_activities()/classify(): "unknown" сохраняется КАК ЕСТЬ, если
+            // лапов с ненулевой длительностью нет вообще — у десктопа нет отдельного грубого
+            // фолбэк-классификатора по среднему пульсу тренировки, только эта одна функция.
+            val typeGuess = byLaps
             val drift = if (laps.isNotEmpty()) computeLapDrift(laps) else null
             db.upsertActivity(
                 r.copy(
+                    lapSource = lapSource,
                     typeGuess = typeGuess,
+                    elevationGainM = confounds?.elevationGainM ?: r.elevationGainM,
+                    elevationLossM = confounds?.elevationLossM ?: r.elevationLossM,
+                    avgTemperatureC = confounds?.avgTemperatureC ?: r.avgTemperatureC,
+                    avgCadenceSpm = confounds?.avgCadenceSpm ?: r.avgCadenceSpm,
+                    avgStrideLengthM = confounds?.avgStrideLengthM ?: r.avgStrideLengthM,
+                    calories = confounds?.calories ?: r.calories,
+                    aerobicTrainingEffect = confounds?.aerobicTrainingEffect ?: r.aerobicTrainingEffect,
+                    anaerobicTrainingEffect = confounds?.anaerobicTrainingEffect ?: r.anaerobicTrainingEffect,
+                    manualActivity = confounds?.manualActivity ?: r.manualActivity,
+                    elevationCorrected = confounds?.elevationCorrected ?: r.elevationCorrected,
+                    waterEstimatedMl = confounds?.waterEstimatedMl ?: r.waterEstimatedMl,
+                    impactLoad = confounds?.impactLoad ?: r.impactLoad,
+                    activityTrainingLoad = confounds?.activityTrainingLoad ?: r.activityTrainingLoad,
+                    differenceBodyBattery = confounds?.differenceBodyBattery ?: r.differenceBodyBattery,
+                    moderateIntensityMin = confounds?.moderateIntensityMin ?: r.moderateIntensityMin,
+                    vigorousIntensityMin = confounds?.vigorousIntensityMin ?: r.vigorousIntensityMin,
+                    hrTimeInZone1 = confounds?.hrZone1 ?: r.hrTimeInZone1,
+                    hrTimeInZone2 = confounds?.hrZone2 ?: r.hrTimeInZone2,
+                    hrTimeInZone3 = confounds?.hrZone3 ?: r.hrTimeInZone3,
+                    hrTimeInZone4 = confounds?.hrZone4 ?: r.hrTimeInZone4,
+                    hrTimeInZone5 = confounds?.hrZone5 ?: r.hrTimeInZone5,
                     avgGapSPerKm = avgGap,
+                    avgDeviceTemperatureC = avgDeviceTemperatureC,
                     cadenceDriftPct = drift?.cadenceDriftPct,
                     gctDriftPct = drift?.gctDriftPct,
                     verticalOscDriftPct = drift?.verticalOscDriftPct
@@ -1116,7 +1236,9 @@ class GarminActivitiesApi(
                                     stressUncategorizedS = dailyFields["stress_uncategorized_s"] as? Double,
                                     stressLowS = dailyFields["stress_low_s"] as? Double,
                                     stressMediumS = dailyFields["stress_medium_s"] as? Double,
-                                    stressHighS = dailyFields["stress_high_s"] as? Double
+                                    stressHighS = dailyFields["stress_high_s"] as? Double,
+                                    sleepStartLocal = sleep["sleep_start_local"] as? String,
+                                    sleepEndLocal = sleep["sleep_end_local"] as? String
                                 ),
                                 exportedAt
                             )

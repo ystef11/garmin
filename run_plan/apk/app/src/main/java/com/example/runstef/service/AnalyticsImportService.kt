@@ -11,13 +11,8 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.example.runstef.MainActivity
 import com.example.runstef.R
-import com.example.runstef.data.ActivityRow
 import com.example.runstef.data.AnalyticsDb
-import com.example.runstef.data.AnalyticsReportBuilder
-import com.example.runstef.data.CrossActivityRow
-import com.example.runstef.data.IntervalRow
-import com.example.runstef.data.LactateThresholdRow
-import com.example.runstef.data.WellnessRow
+import com.example.runstef.data.PythonReportBuilder
 import com.example.runstef.network.garmin.GarminActivitiesApi
 import com.example.runstef.network.garmin.GarminAuth
 import com.example.runstef.network.garmin.GarminTokenStore
@@ -209,46 +204,18 @@ class AnalyticsImportService : Service() {
         serviceScope.launch {
             try {
                 updateNotification("Собираю отчёт: $account")
-                val db = AnalyticsDb.open(application, account)
-                val results = withContext(Dispatchers.IO) {
-                    val since = LocalDate.now().minusYears(2).toString()
-                    val acts = db.activitiesSince(since)
-                    val well = db.wellnessSince(since)
-                    val cross = db.crossActivitiesSince(since)
-                    val pano = db.panoFromDb()
-                    var rhrMaxHr: Pair<Double, Int>? = null
-                    val zones = pano?.let { p ->
-                        val rhr = db.restHrFromDb()
-                        val maxHr = db.maxHrFromDb(acts.mapNotNull { it.maxHr }.maxOrNull())
-                        rhrMaxHr = rhr to maxHr
-                        val hrr = maxHr - rhr
-                        val z3LoHrr = Math.round(rhr + 0.70 * hrr).toInt()
-                        val z2Hi = z3LoHrr - 1
-                        val z3Lo = z2Hi + 1
-                        val z4Lo = Math.round((z3Lo + p) / 2.0).toInt()
-                        Triple(z2Hi, z4Lo, p)
-                    }
-                    val allIntervals = acts.filter { it.avgHr != null }
-                        .associate { it.activityId to db.intervalsForActivity(it.activityId) }
-                    val lactateHistory = db.lactateThresholdSince(since)
-                    kotlin.collections.listOf(acts, well, zones, cross, allIntervals, lactateHistory, rhrMaxHr)
-                }
-                db.close()
-                @Suppress("UNCHECKED_CAST")
-                val html = AnalyticsReportBuilder.build(
-                    account,
-                    results[0] as List<ActivityRow>,
-                    results[1] as List<WellnessRow>,
-                    results[2] as Triple<Int, Int, Int>?,
-                    results[3] as List<CrossActivityRow>,
-                    results[4] as Map<Long, List<IntervalRow>>,
-                    results[5] as List<LactateThresholdRow>,
-                    results[6] as Pair<Double, Int>?
-                )
+                // Отчёт строит ТОТ ЖЕ build_report.py, что и на десктопе (запускается на
+                // устройстве через Chaquopy, см. PythonReportBuilder) -- схема on-device БД
+                // полностью совместима (AnalyticsDb.DB_VERSION=6), поэтому строкам с ручным
+                // SELECT'ом из БД и Kotlin-рендером HTML (AnalyticsReportBuilder) тут больше
+                // не место: путь к файлу БД аккаунта передаётся в Python как есть.
+                val dbFile = AnalyticsDb.dbFileForAccount(application, account)
                 val dir = File(application.filesDir, "reports").apply { mkdirs() }
                 val safe = account.trim().lowercase().replace(Regex("[^a-z0-9]"), "_").ifBlank { "account" }
                 val file = File(dir, "report_$safe.html")
-                file.writeText(html)
+                withContext(Dispatchers.IO) {
+                    PythonReportBuilder.build(application, dbFile, file)
+                }
                 AnalyticsImportBus.setReportPath(file.absolutePath)
             } catch (e: Exception) {
                 AnalyticsImportBus.appendLog("Не удалось собрать отчёт: ${e.message}")
