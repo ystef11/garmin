@@ -5,6 +5,7 @@ import com.example.runstef.data.AnalyticsDb
 import com.example.runstef.data.CrossActivityRow
 import com.example.runstef.data.IntervalRow
 import com.example.runstef.data.WellnessRow
+import com.example.runstef.network.ImportCancelledException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonElement
@@ -27,7 +28,7 @@ import kotlin.math.abs
  * Упрощённый Kotlin-порт garmin_activities_export.py: тренировки (только running-типы) +
  * пара wellness-показателей в сутки (RHR, HRV, качество сна). Полный набор (лапы, кросс-
  * тренировки, история ПАНО, десяток конфаундов EF) остаётся за десктопным скриптом — здесь
- * ровно то, что нужно для отчёта AnalyticsReportBuilder прямо на телефоне без Python.
+ * ровно то, что нужно для аналитики прямо на телефоне без Python.
  *
  * Использует тот же GarminAuth.connectApi (Bearer OAuth2), что и GarminApi (загрузка плана) —
  * один и тот же сохранённый токен/аккаунт обслуживает обе вкладки.
@@ -78,11 +79,11 @@ class GarminActivitiesApi(
 
     data class ImportResult(val fetched: Int, val wellnessDays: Int)
 
-    private fun bodyOf(resp: okhttp3.Response): String {
-        val text = resp.body?.string() ?: "{}"
-        resp.close()
-        return text
-    }
+    private fun bodyOf(resp: okhttp3.Response): String =
+        // .use{} гарантирует close() даже если .string() бросит исключение посреди чтения
+        // (оборванный поток/кодировка) — раньше close() был отдельной строкой ПОСЛЕ .string()
+        // и пропускался при таком исключении, оставляя соединение открытым до GC.
+        resp.use { it.body?.string() ?: "{}" }
 
     /** displayName (не email!) — часть wellness-эндпоинтов требует его в пути URL, см. Python-докстринг
      * resolve_display_name в garmin_activities_export.py: с email часть эндпоинтов отвечает 403. */
@@ -1034,7 +1035,13 @@ class GarminActivitiesApi(
         // не трогать другие вызовы этого метода. Считается по числу "единиц работы" (беговые
         // активности + дни самочувствия, если withWellness), а не по времени, т.к. время одного
         // запроса плавает.
-        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+        // Кооперативная проверка кнопки «Стоп» (см. AnalyticsImportBus.cancelRequested) -
+        // опрашивается между сетевыми запросами (по одной активности/дню самочувствия), а не
+        // через обычную отмену корутины, т.к. этот метод не suspend и блокирующие HTTP-вызовы
+        // внутри него job.cancel() всё равно не прервёт. По умолчанию no-op (не отменяемо) -
+        // остальные вызыватели этого метода не завязаны на кнопку «Стоп».
+        isCancelled: () -> Boolean = { false }
     ): ImportResult {
         log("Период: $startDate .. $endDate")
         val rawAll = fetchAllActivities(tokens, startDate.toString(), endDate.toString())
@@ -1073,6 +1080,7 @@ class GarminActivitiesApi(
         val progressTotal = rows.size + wellnessDaysTotal
         var progressDone = 0
         for (r in rows) {
+            if (isCancelled()) throw ImportCancelledException()
             // Лапы — как в garmin_activities_export.py: тянем ПО КАЖДОЙ активности отдельным
             // запросом (typedsplits → splits), поэтому классификация точнее грубой эвристики
             // (classifyByLaps умеет отличать интервалы/порог/длинную/лёгкую по структуре
@@ -1184,6 +1192,7 @@ class GarminActivitiesApi(
                 }
                 var d = startDate
                 while (!d.isAfter(endDate)) {
+                    if (isCancelled()) throw ImportCancelledException()
                     val dateStr = d.toString()
                     if (dateStr !in already) {
                         val sleep = fetchSleepDay(tokens, username, dateStr)

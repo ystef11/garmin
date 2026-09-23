@@ -15,6 +15,7 @@ import com.example.runstef.data.AnalyticsDb
 import com.example.runstef.data.PythonReportBuilder
 import com.example.runstef.network.garmin.GarminActivitiesApi
 import com.example.runstef.network.garmin.GarminAuth
+import com.example.runstef.network.ImportCancelledException
 import com.example.runstef.network.garmin.GarminTokenStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -115,7 +116,9 @@ class AnalyticsImportService : Service() {
         AnalyticsImportBus.setRunning(true)
         AnalyticsImportBus.setProgress(null)
         AnalyticsImportBus.clearLog()
+        AnalyticsImportBus.clearCancel()
         serviceScope.launch {
+            val db = AnalyticsDb.open(application, account)
             try {
                 updateNotification("Загружаю тренировки: $account")
                 val auth = GarminAuth(log = AnalyticsImportBus::appendLog)
@@ -134,20 +137,26 @@ class AnalyticsImportService : Service() {
                     throw RuntimeException("Нет действующего токена для аккаунта $account: добавь/перелогинь его через «+» у выбора аккаунта")
                 }
                 val api = GarminActivitiesApi(auth, log = AnalyticsImportBus::appendLog)
-                val db = AnalyticsDb.open(application, account)
                 withContext(Dispatchers.IO) {
-                    api.importRange(tokens, db, start, end, withWellness, forceRefresh) { done, total ->
-                        val pct = if (total > 0) (done * 100 / total) else 0
-                        AnalyticsImportBus.setProgress(pct)
-                        updateNotification("Загружаю тренировки: $account - $pct%", pct)
-                    }
+                    api.importRange(
+                        tokens, db, start, end, withWellness, forceRefresh,
+                        onProgress = { done, total ->
+                            val pct = if (total > 0) (done * 100 / total) else 0
+                            AnalyticsImportBus.setProgress(pct)
+                            updateNotification("Загружаю тренировки: $account - $pct%", pct)
+                        },
+                        isCancelled = { AnalyticsImportBus.cancelRequested.value }
+                    )
                 }
-                db.close()
                 AnalyticsImportBus.appendLog("\n[Готово]")
+                AnalyticsImportBus.refreshStats(application, account)
+            } catch (e: ImportCancelledException) {
+                AnalyticsImportBus.appendLog("\n[Остановлено пользователем] сохранено то, что успели загрузить.")
                 AnalyticsImportBus.refreshStats(application, account)
             } catch (e: Exception) {
                 AnalyticsImportBus.appendLog("ОШИБКА: ${e.message}")
             } finally {
+                db.close()
                 AnalyticsImportBus.setProgress(null)
                 AnalyticsImportBus.setRunning(false)
                 finishJob(startId)
@@ -160,6 +169,7 @@ class AnalyticsImportService : Service() {
         AnalyticsImportBus.setRunning(true)
         AnalyticsImportBus.setProgress(null)
         AnalyticsImportBus.clearLog()
+        AnalyticsImportBus.clearCancel()
         AnalyticsImportBus.appendLog(
             "[Авто-обновление] $account: догружаю с $start по $end (2 дня внахлёст - Garmin иногда донасчитывает данные задним числом)."
         )
@@ -180,13 +190,20 @@ class AnalyticsImportService : Service() {
                 } else tokens
                 val api = GarminActivitiesApi(auth, log = AnalyticsImportBus::appendLog)
                 withContext(Dispatchers.IO) {
-                    api.importRange(effectiveTokens, db, start, end, withWellness = true, forceRefreshWellness = false) { done, total ->
-                        val pct = if (total > 0) (done * 100 / total) else 0
-                        AnalyticsImportBus.setProgress(pct)
-                        updateNotification("Авто-обновление: $account - $pct%", pct)
-                    }
+                    api.importRange(
+                        effectiveTokens, db, start, end, withWellness = true, forceRefreshWellness = false,
+                        onProgress = { done, total ->
+                            val pct = if (total > 0) (done * 100 / total) else 0
+                            AnalyticsImportBus.setProgress(pct)
+                            updateNotification("Авто-обновление: $account - $pct%", pct)
+                        },
+                        isCancelled = { AnalyticsImportBus.cancelRequested.value }
+                    )
                 }
                 AnalyticsImportBus.appendLog("[Авто-обновление] готово.")
+                AnalyticsImportBus.refreshStats(application, account)
+            } catch (e: ImportCancelledException) {
+                AnalyticsImportBus.appendLog("[Авто-обновление] остановлено пользователем.")
                 AnalyticsImportBus.refreshStats(application, account)
             } catch (e: Exception) {
                 AnalyticsImportBus.appendLog("[Авто-обновление] ошибка: ${e.message}")
@@ -205,9 +222,9 @@ class AnalyticsImportService : Service() {
             try {
                 // Отчёт строит ТОТ ЖЕ build_report.py, что и на десктопе (запускается на
                 // устройстве через Chaquopy, см. PythonReportBuilder) -- схема on-device БД
-                // полностью совместима (AnalyticsDb.DB_VERSION=6), поэтому строкам с ручным
-                // SELECT'ом из БД и Kotlin-рендером HTML (AnalyticsReportBuilder) тут больше
-                // не место: путь к файлу БД аккаунта передаётся в Python как есть.
+                // полностью совместима (AnalyticsDb.DB_VERSION=6), поэтому ручному SELECT'у из
+                // БД и Kotlin-рендеру HTML тут больше не место: путь к файлу БД аккаунта
+                // передаётся в Python как есть.
                 val dbFile = AnalyticsDb.dbFileForAccount(application, account)
                 val dir = File(application.filesDir, "reports").apply { mkdirs() }
                 val safe = account.trim().lowercase().replace(Regex("[^a-z0-9]"), "_").ifBlank { "account" }

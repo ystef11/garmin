@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
@@ -88,6 +89,13 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
     var account by rememberSaveable { mutableStateOf("") }
 
     var startDate by rememberSaveable { mutableStateOf("") }
+    // Стало true, как только пользователь САМ поменял поле «С» руками (см. DateField ниже).
+    // Раньше вместо этого флага использовалась проверка startDate.isBlank() в LaunchedEffect
+    // (lastActivityDate) — но после первого же авто-подставления значения поле уже не пустое,
+    // поэтому она неотличима от «пользователь трогал поле руками» и импорт базы из файла
+    // (см. AnalyticsViewModel.importDbFromUri) её больше не обновлял, хотя lastActivityDate
+    // в шине менялся правильно.
+    var startDateTouchedByUser by rememberSaveable { mutableStateOf(false) }
     var endDate by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
     // Больше не переключается пользователем - по умолчанию всегда выгружаем всё (включая самочувствие).
     val withWellness = true
@@ -100,6 +108,7 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
     val firstActivityDate by vm.firstActivityDate.collectAsState()
     val activityCount by vm.activityCount.collectAsState()
     val reportPath by vm.reportPath.collectAsState()
+    val cancelRequested by vm.cancelRequested.collectAsState()
 
     LaunchedEffect(Unit) {
         val last = vm.lastUsedAccount()
@@ -117,9 +126,10 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
     // if (account.isNotBlank()) vm.autoCatchUp(account)
     // По умолчанию поле «С» — дата последней загруженной тренировки (см. doc выше). Реагируем на
     // сам lastActivityDate (а не только на первый рендер), т.к. после авто-обновления/импорта он
-    // может смениться, а поле «С» ещё не трогали руками (startDate.isBlank()).
+    // может смениться, а поле «С» ещё не трогали руками (startDateTouchedByUser == false —
+    // это касается и импорта базы из файла, не только сетевой авто-догрузки).
     LaunchedEffect(lastActivityDate) {
-        if (startDate.isBlank()) {
+        if (!startDateTouchedByUser) {
             startDate = lastActivityDate ?: LocalDate.now().minusDays(365).toString()
         }
     }
@@ -160,7 +170,7 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
                 DateField(
                     label = "С",
                     value = startDate,
-                    onValueChange = { startDate = it },
+                    onValueChange = { startDate = it; startDateTouchedByUser = true },
                     modifier = Modifier.weight(1f)
                 )
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(4.dp))
@@ -188,8 +198,31 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
             // Визуально единая "капсула" (как в стандартных split-button из Material) - общая
             // рамка/скругление на весь Row, а не два отдельных OutlinedButton рядом: внутри
             // тонкий вертикальный разделитель между текстовой частью и стрелкой раскрытия меню.
-            val importButtonEnabled = !isRunning && account.isNotBlank() && startDate.isNotBlank()
+            // Раньше проверялось только startDate.isNotBlank() - при недописанной вручную дате
+            // (например, ещё не введён год целиком) кнопка оставалась активной, LocalDate.parse
+            // падал молча (см. runCatching ниже), и клик просто ничего не делал без объяснения
+            // — или, того хуже, использовал последнее успешно распарсенное значение ДО того, как
+            // пользователь закончил править поле. Теперь обе даты должны быть валидны целиком.
+            val startDateValid = runCatching { LocalDate.parse(startDate) }.isSuccess
+            val endDateValid = endDate.isBlank() || runCatching { LocalDate.parse(endDate) }.isSuccess
+            val importButtonEnabled = !isRunning && account.isNotBlank() && startDateValid && endDateValid
             val importMenuEnabled = account.isNotBlank() && !isRunning
+            // Пока идёт импорт/авто-догрузка, на месте этой капсулы ("Загрузить тренировки" +
+            // стрелка меню) показываем кнопку «Стоп» — по месту, где пользователь только что
+            // нажал загрузку, а не отдельным элементом внизу под «Построить отчёт» (см. правку
+            // 2026-09-23: раньше Стоп был ниже и терялся). Останов не мгновенный — кооперативный
+            // флаг проверяется между запросами (см. GarminActivitiesApi.importRange), поэтому
+            // после нажатия кнопка показывает "Останавливаю…" и блокируется до конца сервиса.
+            if (isRunning) {
+                OutlinedButton(
+                    enabled = !cancelRequested,
+                    onClick = { vm.cancelImport() },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                ) { Text(if (cancelRequested) "Останавливаю…" else "Стоп") }
+            } else {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -268,6 +301,7 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
                         )
                     }
                 }
+            }
             }
             // ГЛАВНОЕ действие вкладки - построение отчёта (по запросу пользователя 2026-08-23:
             // "так же выделена кнопка 'импортировать тренировки', хотя главная - 'построить

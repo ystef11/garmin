@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import kotlinx.serialization.json.Json
+import com.example.runstef.network.NetworkModule
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
@@ -111,7 +112,7 @@ private val HARDCODED_FALLBACK = BundledConfig(
  */
 class ConfigRepository(private val context: Context) {
 
-    private val client = OkHttpClient.Builder()
+    private val client = NetworkModule.baseClient.newBuilder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
         .build()

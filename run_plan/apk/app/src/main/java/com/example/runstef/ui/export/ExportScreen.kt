@@ -13,6 +13,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -44,7 +46,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.runstef.data.PlanRepository
 import com.example.runstef.data.SavedPlan
 import com.example.runstef.ui.common.GarminAccountSelector
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val CROSS_TYPES = listOf(
     "cycling" to "Велосипед",
@@ -61,12 +65,10 @@ fun ExportScreen(preselectedFilePath: String? = null) {
     val planRepo = remember { PlanRepository(context) }
     val vm: ExportViewModel = viewModel()
 
-    var plans by remember { mutableStateOf(planRepo.listPlans()) }
-    var selectedPlan by remember {
-        mutableStateOf(plans.firstOrNull { it.filePath == preselectedFilePath } ?: plans.firstOrNull())
-    }
+    var plans by remember { mutableStateOf<List<SavedPlan>>(emptyList()) }
+    var selectedPlan by remember { mutableStateOf<SavedPlan?>(null) }
     LaunchedEffect(Unit) {
-        plans = planRepo.listPlans()
+        plans = withContext(Dispatchers.IO) { planRepo.listPlans() }
         if (selectedPlan == null) {
             selectedPlan = plans.firstOrNull { it.filePath == preselectedFilePath } ?: plans.firstOrNull()
         }
@@ -81,6 +83,7 @@ fun ExportScreen(preselectedFilePath: String? = null) {
 
     val logLines by vm.log.collectAsState()
     val isRunning by vm.isRunning.collectAsState()
+    val cancelRequested by vm.cancelRequested.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Экспорт плана", style = MaterialTheme.typography.headlineSmall)
@@ -113,6 +116,9 @@ fun ExportScreen(preselectedFilePath: String? = null) {
                 GarminTab(
                     initialAccounts = vm.savedGarminAccounts(),
                     enabled = !isRunning && plan != null,
+                    isRunning = isRunning,
+                    cancelRequested = cancelRequested,
+                    onCancel = { vm.cancelExport() },
                     onSubmit = { account, allDates, fromDate ->
                         plan?.let {
                             vm.exportToGarmin(it, account, skipCross.value, dryRun, testFirstWeek, allDates, fromDate)
@@ -123,6 +129,9 @@ fun ExportScreen(preselectedFilePath: String? = null) {
                 IntervalsTab(
                     vm = vm,
                     enabled = !isRunning && plan != null,
+                    isRunning = isRunning,
+                    cancelRequested = cancelRequested,
+                    onCancel = { vm.cancelExport() },
                     onSubmit = { apiKey, athlete ->
                         plan?.let { vm.exportToIntervals(it, apiKey, athlete, skipCross.value, dryRun) }
                     }
@@ -219,6 +228,9 @@ private fun CrossTypeChips(selected: Set<String>, onChange: (Set<String>) -> Uni
 private fun GarminTab(
     initialAccounts: List<String>,
     enabled: Boolean,
+    isRunning: Boolean,
+    cancelRequested: Boolean,
+    onCancel: () -> Unit,
     onSubmit: (account: String, allDates: Boolean, fromDate: java.time.LocalDate?) -> Unit
 ) {
     var savedAccounts by remember { mutableStateOf(initialAccounts) }
@@ -255,14 +267,25 @@ private fun GarminTab(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp)
         )
-        Button(
-            enabled = enabled && account.isNotBlank(),
-            onClick = {
-                val fromDate = fromDateStr.takeIf { it.isNotBlank() }?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
-                onSubmit(account.trim(), allDates, fromDate)
-            },
-            modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
-        ) { Text("Отправить в Garmin Connect") }
+        // Пока идёт отправка, на месте кнопки отправки показываем «Стоп» — по месту, где
+        // пользователь только что нажал отправку (см. аналогичное решение в AnalyticsScreen).
+        if (isRunning) {
+            OutlinedButton(
+                enabled = !cancelRequested,
+                onClick = onCancel,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+            ) { Text(if (cancelRequested) "Останавливаю…" else "Стоп") }
+        } else {
+            Button(
+                enabled = enabled && account.isNotBlank(),
+                onClick = {
+                    val fromDate = fromDateStr.takeIf { it.isNotBlank() }?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
+                    onSubmit(account.trim(), allDates, fromDate)
+                },
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+            ) { Text("Отправить в Garmin Connect") }
+        }
     }
 }
 
@@ -270,6 +293,9 @@ private fun GarminTab(
 private fun IntervalsTab(
     vm: ExportViewModel,
     enabled: Boolean,
+    isRunning: Boolean,
+    cancelRequested: Boolean,
+    onCancel: () -> Unit,
     onSubmit: (apiKey: String, athlete: String) -> Unit
 ) {
     var apiKey by remember { mutableStateOf("") }
@@ -301,10 +327,19 @@ private fun IntervalsTab(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 8.dp)
         )
-        Button(
-            enabled = enabled && apiKey.isNotBlank() && athlete.isNotBlank(),
-            onClick = { onSubmit(apiKey.trim(), athlete.trim()) },
-            modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
-        ) { Text("Отправить в intervals.icu") }
+        if (isRunning) {
+            OutlinedButton(
+                enabled = !cancelRequested,
+                onClick = onCancel,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+            ) { Text(if (cancelRequested) "Останавливаю…" else "Стоп") }
+        } else {
+            Button(
+                enabled = enabled && apiKey.isNotBlank() && athlete.isNotBlank(),
+                onClick = { onSubmit(apiKey.trim(), athlete.trim()) },
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+            ) { Text("Отправить в intervals.icu") }
+        }
     }
 }

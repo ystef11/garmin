@@ -10,8 +10,9 @@ import java.io.File
  * Запускает десктопный build_report.py (см. garmin/run_plan/build_report.py, скопирован БЕЗ
  * ИЗМЕНЕНИЙ в app/src/main/python/build_report.py) прямо на устройстве через Chaquopy -- тот же
  * numpy/pandas/matplotlib расчёт и те же PNG-графики (base64 внутри HTML), что и в десктопном
- * отчёте, вместо частичного Kotlin-аналога (см. историю AnalyticsReportBuilder.kt, которую этот
- * класс заменяет как источник отчёта в AnalyticsImportService).
+ * отчёте, вместо частичного Kotlin-аналога, который раньше строил тот же отчёт прямо на
+ * устройстве (AnalyticsReportBuilder.kt и связанные файлы — удалены как мёртвый код после
+ * перехода на этот класс).
  *
  * Схема on-device БД (см. AnalyticsDb, DB_VERSION=6 "полный репаритет схемы с десктопом")
  * совместима с тем, что читает build_report.py -- отдельного экспорта/конвертации не нужно,

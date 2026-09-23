@@ -285,4 +285,11 @@ class AnalyticsViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun consumeReportPath() { AnalyticsImportBus.setReportPath(null) }
+
+    /** Ставит кооперативный флаг отмены для текущего импорта/авто-догрузки (см.
+     * AnalyticsImportBus.cancelRequested и GarminActivitiesApi.importRange) - сама операция
+     * останавливается не мгновенно, а на ближайшей проверке между запросами, и то, что уже
+     * успели загрузить, остаётся в базе (upsert построчно). На сборку отчёта не действует. */
+    fun cancelImport() { AnalyticsImportBus.requestCancel() }
+    val cancelRequested: StateFlow<Boolean> = AnalyticsImportBus.cancelRequested
 }

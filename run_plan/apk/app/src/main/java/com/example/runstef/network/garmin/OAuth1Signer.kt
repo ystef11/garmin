@@ -1,10 +1,10 @@
 package com.example.runstef.network.garmin
 
 import java.net.URLEncoder
+import java.security.SecureRandom
 import java.util.SortedMap
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
-import kotlin.random.Random
 
 /**
  * Минимальная реализация подписи OAuth 1.0a (HMAC-SHA1), нужная для обмена
@@ -12,13 +12,19 @@ import kotlin.random.Random
  */
 object OAuth1Signer {
 
+    private val secureRandom = SecureRandom()
+
     fun rfc3986Encode(value: String): String =
         URLEncoder.encode(value, "UTF-8")
             .replace("+", "%20")
             .replace("*", "%2A")
             .replace("%7E", "~")
 
-    fun nonce(): String = (1..24).map { "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".random() }.joinToString("")
+    private const val NONCE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+    fun nonce(): String = (1..24)
+        .map { NONCE_ALPHABET[secureRandom.nextInt(NONCE_ALPHABET.length)] }
+        .joinToString("")
 
     /**
      * Строит заголовок Authorization: OAuth ... для запроса method+url с доп. oauth-параметрами

@@ -30,7 +30,7 @@ class OfflineCacheWebViewClient(
         onPageFinished?.invoke(view)
     }
 
-    private val client = OkHttpClient.Builder()
+    private val client = NetworkModule.baseClient.newBuilder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
         .build()

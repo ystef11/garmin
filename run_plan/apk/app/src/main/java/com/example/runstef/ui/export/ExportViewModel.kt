@@ -10,6 +10,7 @@ import com.example.runstef.network.IntervalsApi
 import com.example.runstef.network.garmin.GarminApi
 import com.example.runstef.network.garmin.GarminAuth
 import com.example.runstef.network.garmin.GarminTokenStore
+import com.example.runstef.network.ImportCancelledException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +30,14 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _isRunning = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
+
+    // Кнопка «Стоп» на вкладке «Экспорт» - тот же кооперативный подход, что и в аналитике
+    // (см. AnalyticsImportBus.cancelRequested): GarminApi.upload/IntervalsApi.upload не
+    // suspend-функции, поэтому обычная отмена корутины (job.cancel()) их блокирующие HTTP-
+    // вызовы не прервёт - вместо этого они сами опрашивают этот флаг между запросами.
+    private val _cancelRequested = MutableStateFlow(false)
+    val cancelRequested: StateFlow<Boolean> = _cancelRequested.asStateFlow()
+    fun cancelExport() { _cancelRequested.value = true }
 
     fun savedGarminAccounts(): List<String> = garminTokenStore.savedAccounts()
 
@@ -55,14 +64,17 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
     ) {
         if (_isRunning.value) return
         _isRunning.value = true
+        _cancelRequested.value = false
         clearLog()
         viewModelScope.launch {
             try {
                 settings.saveIntervalsCreds(apiKey, athleteId)
                 val api = IntervalsApi(apiKey, athleteId, log = ::appendLog)
                 withContext(Dispatchers.IO) {
-                    api.upload(plan, skipCross, dryRun)
+                    api.upload(plan, skipCross, dryRun, isCancelled = { _cancelRequested.value })
                 }
+            } catch (e: ImportCancelledException) {
+                appendLog("Отменено пользователем.")
             } catch (e: Exception) {
                 appendLog("ОШИБКА: ${e.message}")
             } finally {
@@ -82,6 +94,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
     ) {
         if (_isRunning.value) return
         _isRunning.value = true
+        _cancelRequested.value = false
         clearLog()
         viewModelScope.launch {
             try {
@@ -106,8 +119,13 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
                 settings.saveLastGarminAccount(account)
                 val api = GarminApi(auth, log = ::appendLog)
                 withContext(Dispatchers.IO) {
-                    api.upload(plan, tokens!!, skipCross, dryRun, testFirstWeek, allDates, fromDate)
+                    api.upload(
+                        plan, tokens!!, skipCross, dryRun, testFirstWeek, allDates, fromDate,
+                        isCancelled = { _cancelRequested.value }
+                    )
                 }
+            } catch (e: ImportCancelledException) {
+                appendLog("Отменено пользователем.")
             } catch (e: Exception) {
                 appendLog("ОШИБКА: ${e.message}")
             } finally {

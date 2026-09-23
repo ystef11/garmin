@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
  */
 object ApkUpdater {
 
-    private val client = OkHttpClient.Builder()
+    private val client = NetworkModule.baseClient.newBuilder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()

@@ -17,7 +17,7 @@ class SettingsStore(private val context: Context) {
     private val keyIntervalsAthlete = "intervals_athlete_id"
     private val keyLastGarminAccount = "last_garmin_account"
 
-    private val prefs get() = CryptoManager.securePrefs(context)
+    private val prefs by lazy { CryptoManager.securePrefs(context) }
 
     suspend fun getIntervalsApiKey(): String = prefs.getString(keyIntervalsApiKey, "") ?: ""
     suspend fun getIntervalsAthlete(): String = prefs.getString(keyIntervalsAthlete, "") ?: ""

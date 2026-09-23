@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
  */
 object PlanUrlLoader {
 
-    private val client = OkHttpClient.Builder()
+    private val client = NetworkModule.baseClient.newBuilder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
         .build()

@@ -51,11 +51,23 @@ object AnalyticsImportBus {
     private val _progress = MutableStateFlow<Int?>(null)
     val progress: StateFlow<Int?> = _progress.asStateFlow()
 
+    // Кнопка "Стоп" на экране аналитики ставит этот флаг в true, пока идёт импорт/авто-
+    // догрузка (см. AnalyticsScreen). Сама сетевая работа в GarminActivitiesApi.importRange
+    // не suspend-функция и не проверяет обычную отмену корутины (job.cancel() не прервёт её
+    // посреди Thread.sleep/блокирующего HTTP-вызова) -- поэтому это простой кооперативный
+    // флаг, который importRange сам опрашивает между запросами (после каждой активности/дня
+    // самочувствия) и прерывается ImportCancelledException. Сборку отчёта (runBuildReport)
+    // не отменяем -- она короткая и локальная, кнопка "Стоп" на ней не показывается.
+    private val _cancelRequested = MutableStateFlow(false)
+    val cancelRequested: StateFlow<Boolean> = _cancelRequested.asStateFlow()
+
     fun appendLog(line: String) { _log.value = _log.value + line }
     fun clearLog() { _log.value = emptyList() }
     fun setRunning(running: Boolean) { _isRunning.value = running }
     fun setReportPath(path: String?) { _reportPath.value = path }
     fun setProgress(percent: Int?) { _progress.value = percent }
+    fun requestCancel() { _cancelRequested.value = true }
+    fun clearCancel() { _cancelRequested.value = false }
 
     /** Помечает [account] как аккаунт, который сейчас выбран/показан на экране аналитики --
      * вызывается ТОЛЬКО из явного пользовательского переключения (AnalyticsViewModel.

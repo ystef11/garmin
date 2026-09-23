@@ -19,8 +19,17 @@ class AuthStore(context: Context) {
         const val KEY_PIN_HASH = "pin_hash"
         const val KEY_PIN_SALT = "pin_salt"
         const val KEY_BIOMETRIC_ENABLED = "biometric_enabled"
+        const val KEY_FAILED_ATTEMPTS = "pin_failed_attempts"
+        const val KEY_LOCKED_UNTIL_MS = "pin_locked_until_ms"
         const val ITERATIONS = 120_000
         const val KEY_LENGTH_BITS = 256
+
+        // Защита от подбора ПИН при физическом доступе к устройству: после
+        // LOCKOUT_THRESHOLD неверных попыток подряд включается экспоненциальный backoff
+        // (30с, 60с, 120с, ... до получаса), вместо неограниченного числа локальных попыток.
+        const val LOCKOUT_THRESHOLD = 5
+        const val LOCKOUT_BASE_SECONDS = 30L
+        const val LOCKOUT_MAX_SECONDS = 1800L
     }
 
     fun isPinSet(): Boolean = prefs.contains(KEY_PIN_HASH)
@@ -31,19 +40,51 @@ class AuthStore(context: Context) {
         prefs.edit()
             .putString(KEY_PIN_SALT, salt.toHex())
             .putString(KEY_PIN_HASH, hash.toHex())
+            .putInt(KEY_FAILED_ATTEMPTS, 0)
+            .remove(KEY_LOCKED_UNTIL_MS)
             .apply()
     }
 
+    /** Сколько секунд ещё действует блокировка после серии неверных ПИН — 0, если блокировки нет. */
+    fun remainingLockoutSeconds(): Long {
+        val until = prefs.getLong(KEY_LOCKED_UNTIL_MS, 0L)
+        val remain = (until - System.currentTimeMillis()) / 1000L
+        return if (remain > 0) remain else 0L
+    }
+
     fun verifyPin(pin: String): Boolean {
+        if (remainingLockoutSeconds() > 0) return false
         val saltHex = prefs.getString(KEY_PIN_SALT, null) ?: return false
         val expectedHex = prefs.getString(KEY_PIN_HASH, null) ?: return false
         val actualHex = hash(pin, saltHex.fromHex()).toHex()
         // Сравнение постоянного времени, чтобы не давать утечки по таймингу.
-        return MessageDigest.isEqual(actualHex.toByteArray(), expectedHex.toByteArray())
+        val ok = MessageDigest.isEqual(actualHex.toByteArray(), expectedHex.toByteArray())
+        if (ok) {
+            prefs.edit().putInt(KEY_FAILED_ATTEMPTS, 0).remove(KEY_LOCKED_UNTIL_MS).apply()
+        } else {
+            registerFailedAttempt()
+        }
+        return ok
+    }
+
+    private fun registerFailedAttempt() {
+        val attempts = prefs.getInt(KEY_FAILED_ATTEMPTS, 0) + 1
+        val editor = prefs.edit().putInt(KEY_FAILED_ATTEMPTS, attempts)
+        if (attempts >= LOCKOUT_THRESHOLD) {
+            val extraSteps = attempts - LOCKOUT_THRESHOLD
+            val backoffSeconds = (LOCKOUT_BASE_SECONDS shl minOf(extraSteps, 6)).coerceAtMost(LOCKOUT_MAX_SECONDS)
+            editor.putLong(KEY_LOCKED_UNTIL_MS, System.currentTimeMillis() + backoffSeconds * 1000L)
+        }
+        editor.apply()
     }
 
     fun clearPin() {
-        prefs.edit().remove(KEY_PIN_HASH).remove(KEY_PIN_SALT).apply()
+        prefs.edit()
+            .remove(KEY_PIN_HASH)
+            .remove(KEY_PIN_SALT)
+            .remove(KEY_FAILED_ATTEMPTS)
+            .remove(KEY_LOCKED_UNTIL_MS)
+            .apply()
     }
 
     var biometricEnabled: Boolean

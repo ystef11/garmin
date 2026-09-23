@@ -4,6 +4,7 @@ import com.example.runstef.data.PlanStep
 import com.example.runstef.data.PlanTarget
 import com.example.runstef.data.RunPlan
 import com.example.runstef.data.PlanWorkout
+import com.example.runstef.network.ImportCancelledException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -42,7 +43,7 @@ class IntervalsApi(
         )
     }
 
-    private val client = OkHttpClient.Builder()
+    private val client = NetworkModule.baseClient.newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
@@ -163,7 +164,14 @@ class IntervalsApi(
 
     data class Result(val ok: Int = 0, val cleared: Int = 0, val dryRun: Boolean = false, val count: Int = 0)
 
-    fun upload(plan: RunPlan, skipCross: Set<String>, dryRun: Boolean): Result {
+    fun upload(
+        plan: RunPlan,
+        skipCross: Set<String>,
+        dryRun: Boolean,
+        // Кооперативная проверка кнопки «Стоп» на вкладке «Экспорт» (см.
+        // ExportViewModel.cancelExport) - опрашивается между запросами. По умолчанию no-op.
+        isCancelled: () -> Boolean = { false }
+    ): Result {
         val tag = plan.meta.tag
         val events = plan.workouts.mapNotNull { eventFor(it, skipCross) }.sortedBy { it.startDateLocal }
         if (events.isEmpty()) throw RuntimeException("В плане нет тренировок для импорта.")
@@ -190,6 +198,7 @@ class IntervalsApi(
         val listJson = request("GET", "$evUrl?oldest=$d0&newest=$d1&category=WORKOUT")
         val arr = runCatching { Json.parseToJsonElement(listJson).jsonArray }.getOrNull()
         arr?.forEach { el ->
+            if (isCancelled()) throw ImportCancelledException()
             val obj = el.jsonObject
             val name = obj["name"]?.jsonPrimitive?.content ?: ""
             if (name.startsWith(tag)) {
@@ -202,6 +211,7 @@ class IntervalsApi(
 
         var ok = 0
         for (e in events) {
+            if (isCancelled()) throw ImportCancelledException()
             request("POST", evUrl, e.toJson())
             ok++
             if (ok % 10 == 0) log("  создано $ok/${events.size}…")

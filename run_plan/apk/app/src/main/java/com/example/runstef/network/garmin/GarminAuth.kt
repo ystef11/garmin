@@ -1,6 +1,7 @@
 package com.example.runstef.network.garmin
 
 import kotlinx.serialization.json.Json
+import com.example.runstef.network.NetworkModule
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.FormBody
@@ -36,7 +37,7 @@ class GarminAuth(
         private val MFA_MARKER = "sso.garmin.com/sso/verifyMFA/loginEnterMfaCode"
     }
 
-    private val client = OkHttpClient.Builder()
+    private val client = NetworkModule.baseClient.newBuilder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .followRedirects(true)

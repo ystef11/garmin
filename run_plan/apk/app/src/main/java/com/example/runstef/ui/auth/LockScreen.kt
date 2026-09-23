@@ -62,6 +62,7 @@ fun LockScreen(activity: FragmentActivity, authViewModel: AuthViewModel) {
             activity = activity,
             showBiometric = biometricAvailable && biometricEnabled,
             onVerify = { pin -> authViewModel.tryUnlockWithPin(pin) },
+            onLockoutSecondsRemaining = { authViewModel.lockoutSecondsRemaining() },
             onBiometricSuccess = { authViewModel.unlockWithBiometric() }
         )
     }
@@ -128,6 +129,7 @@ private fun PinUnlockContent(
     activity: FragmentActivity,
     showBiometric: Boolean,
     onVerify: (String) -> Boolean,
+    onLockoutSecondsRemaining: () -> Long = { 0L },
     onBiometricSuccess: () -> Unit
 ) {
     var pin by remember { mutableStateOf("") }
@@ -187,7 +189,12 @@ private fun PinUnlockContent(
                         if (onVerify(next)) {
                             error = null
                         } else {
-                            error = "Неверный ПИН-код"
+                            val lockoutSecs = onLockoutSecondsRemaining()
+                            error = if (lockoutSecs > 0) {
+                                "Слишком много попыток. Попробуйте снова через $lockoutSecs с"
+                            } else {
+                                "Неверный ПИН-код"
+                            }
                             pin = ""
                         }
                     }

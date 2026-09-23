@@ -51,6 +51,9 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
         return ok
     }
 
+    /** Сколько секунд ещё действует блокировка после серии неверных ПИН (0 — блокировки нет). */
+    fun lockoutSecondsRemaining(): Long = authStore.remainingLockoutSeconds()
+
     fun unlockWithBiometric() {
         _unlocked.value = true
     }

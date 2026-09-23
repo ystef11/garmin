@@ -5,6 +5,10 @@ plugins {
     id("com.chaquo.python")
 }
 
+base {
+    archivesName.set("runstef")
+}
+
 android {
     namespace = "com.example.runstef"
     compileSdk {
@@ -33,8 +37,14 @@ android {
     buildTypes {
         release {
             optimization {
-                enable = false
+                enable = true
             }
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
     compileOptions {

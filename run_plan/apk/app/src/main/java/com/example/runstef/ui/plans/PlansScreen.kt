@@ -75,7 +75,7 @@ fun PlansScreen(
 ) {
     val context = LocalContext.current
     val repo = remember { PlanRepository(context) }
-    var plans by remember { mutableStateOf(repo.listPlans()) }
+    var plans by remember { mutableStateOf<List<SavedPlan>>(emptyList()) }
     var pendingDelete by remember { mutableStateOf<SavedPlan?>(null) }
     var pendingRename by remember { mutableStateOf<SavedPlan?>(null) }
     var fabMenuExpanded by remember { mutableStateOf(false) }
@@ -84,28 +84,31 @@ fun PlansScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) { plans = repo.listPlans() }
+    LaunchedEffect(Unit) { plans = withContext(Dispatchers.IO) { repo.listPlans() } }
 
     // «Из файла» — импорт ранее скачанного HTML-плана через системный файловый менеджер.
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            try {
-                val html = context.contentResolver.openInputStream(uri)?.use {
-                    it.readBytes().toString(Charsets.UTF_8)
-                }
-                if (html != null) {
-                    val saved = repo.savePlan(html)
-                    plans = repo.listPlans()
-                    scope.launch {
-                        snackbarHostState.showSnackbar("План «${saved.plan.meta.name}» импортирован")
+            scope.launch {
+                try {
+                    val (saved, updated) = withContext(Dispatchers.IO) {
+                        val html = context.contentResolver.openInputStream(uri)?.use {
+                            it.readBytes().toString(Charsets.UTF_8)
+                        }
+                        val savedPlan = html?.let { repo.savePlan(it) }
+                        savedPlan to repo.listPlans()
                     }
-                } else {
-                    scope.launch { snackbarHostState.showSnackbar("Не удалось прочитать файл") }
+                    plans = updated
+                    if (saved != null) {
+                        snackbarHostState.showSnackbar("План «${saved.plan.meta.name}» импортирован")
+                    } else {
+                        snackbarHostState.showSnackbar("Не удалось прочитать файл")
+                    }
+                } catch (e: Exception) {
+                    snackbarHostState.showSnackbar("Ошибка импорта: ${e.message}")
                 }
-            } catch (e: Exception) {
-                scope.launch { snackbarHostState.showSnackbar("Ошибка импорта: ${e.message}") }
             }
         }
     }
@@ -229,9 +232,13 @@ fun PlansScreen(
             text = { Text(toDelete.plan.meta.name) },
             confirmButton = {
                 TextButton(onClick = {
-                    repo.deletePlan(toDelete.filePath)
-                    plans = repo.listPlans()
                     pendingDelete = null
+                    scope.launch {
+                        plans = withContext(Dispatchers.IO) {
+                            repo.deletePlan(toDelete.filePath)
+                            repo.listPlans()
+                        }
+                    }
                 }) { Text("Удалить") }
             },
             dismissButton = {
@@ -256,11 +263,15 @@ fun PlansScreen(
                 TextButton(
                     onClick = {
                         val newName = name.trim()
-                        if (newName.isNotEmpty()) {
-                            repo.renamePlan(toRename.filePath, newName)
-                            plans = repo.listPlans()
-                        }
                         pendingRename = null
+                        if (newName.isNotEmpty()) {
+                            scope.launch {
+                                plans = withContext(Dispatchers.IO) {
+                                    repo.renamePlan(toRename.filePath, newName)
+                                    repo.listPlans()
+                                }
+                            }
+                        }
                     }
                 ) { Text("Сохранить") }
             },
@@ -305,8 +316,11 @@ fun PlansScreen(
                                 when {
                                     html != null && PlanHtmlParser.looksLikePlanHtml(html) -> {
                                         try {
-                                            val saved = repo.savePlan(html)
-                                            plans = repo.listPlans()
+                                            val (saved, updated) = withContext(Dispatchers.IO) {
+                                                val savedPlan = repo.savePlan(html)
+                                                savedPlan to repo.listPlans()
+                                            }
+                                            plans = updated
                                             snackbarHostState.showSnackbar("План «${saved.plan.meta.name}» сохранён из URL")
                                             onViewPlan(saved.filePath)
                                         } catch (e: Exception) {

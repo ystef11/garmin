@@ -3,6 +3,7 @@ package com.example.runstef.network.garmin
 import com.example.runstef.data.PlanStep
 import com.example.runstef.data.PlanWorkout
 import com.example.runstef.data.RunPlan
+import com.example.runstef.network.ImportCancelledException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -264,7 +265,12 @@ class GarminApi(
         dryRun: Boolean,
         testFirstWeek: Boolean,
         allDates: Boolean = false,
-        fromDate: LocalDate? = null
+        fromDate: LocalDate? = null,
+        // Кооперативная проверка кнопки «Стоп» на вкладке «Экспорт» (см.
+        // ExportViewModel.cancelExport / AnalyticsImportBus.cancelRequested) - опрашивается
+        // между запросами, т.к. этот метод не suspend и job.cancel() не прервёт блокирующий
+        // HTTP-вызов внутри него. По умолчанию no-op.
+        isCancelled: () -> Boolean = { false }
     ): Result {
         val tag = plan.meta.tag
         val allItems = buildItems(plan, skipCross)
@@ -307,15 +313,15 @@ class GarminApi(
         // могло измениться в новой версии плана при том же имени.
         try {
             val namesToUpload = items.map { it.name }.toSet()
-            val existingResp = auth.connectApi(tokens, "/workout-service/workouts?start=0&limit=999")
-            val existingText = existingResp.body?.string() ?: "[]"
-            existingResp.close()
+            val existingText = auth.connectApi(tokens, "/workout-service/workouts?start=0&limit=999")
+                .use { it.body?.string() ?: "[]" }
             val existing = runCatching { Json.parseToJsonElement(existingText).jsonArray }.getOrNull()
             val dupes = existing?.filter { (it.jsonObject["workoutName"]?.jsonPrimitive?.content ?: "") in namesToUpload } ?: emptyList()
             if (dupes.isNotEmpty()) {
                 log("Удаляю ${dupes.size} уже существующих тренировок с такими же именами (чтобы не плодить дубли)…")
                 var removedDupes = 0
                 for (obj in dupes) {
+                    if (isCancelled()) throw ImportCancelledException()
                     val id = obj.jsonObject["workoutId"]?.jsonPrimitive?.content ?: continue
                     try {
                         auth.connectApi(tokens, "/workout-service/workout/$id", "DELETE").close()
@@ -334,11 +340,13 @@ class GarminApi(
         var ok = 0
         var fail = 0
         for (item in items) {
+            if (isCancelled()) throw ImportCancelledException()
             try {
-                val postResp = auth.connectApi(tokens, "/workout-service/workout", "POST", Json.encodeToString(JsonObject.serializer(), item.workoutJson))
-                val postText = postResp.body?.string() ?: "{}"
-                postResp.close()
-                if (!postResp.isSuccessful) throw RuntimeException("HTTP ${postResp.code}: ${postText.take(300)}")
+                val (postCode, postSuccessful, postText) = auth.connectApi(
+                    tokens, "/workout-service/workout", "POST",
+                    Json.encodeToString(JsonObject.serializer(), item.workoutJson)
+                ).use { Triple(it.code, it.isSuccessful, it.body?.string() ?: "{}") }
+                if (!postSuccessful) throw RuntimeException("HTTP $postCode: ${postText.take(300)}")
                 val workoutId = Json.parseToJsonElement(postText).jsonObject["workoutId"]?.jsonPrimitive?.content
                     ?: throw RuntimeException("Ответ без workoutId: ${postText.take(300)}")
                 val scheduleBody = buildJsonObject { put("date", item.date.toString()) }

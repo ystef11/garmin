@@ -23,7 +23,7 @@ import com.example.runstef.network.enableZoom
 import java.io.File
 
 /**
- * Показывает HTML-отчёт аналитики (сгенерирован AnalyticsReportBuilder, лежит в
+ * Показывает HTML-отчёт аналитики (сгенерирован PythonReportBuilder/build_report.py, лежит в
  * filesDir/reports/) во встроенном WebView — тот же приём с content://-URI через FileProvider,
  * что и в PlanViewScreen (рендер-процесс WebView не имеет прямого доступа к диску приложения,
  * а сетевые/виртуальные хосты на некоторых устройствах не резолвятся).
@@ -45,7 +45,7 @@ fun AnalyticsReportScreen(filePath: String) {
         factory = { ctx ->
             lateinit var swipeRefresh: SwipeRefreshLayout
             val webView = WebView(ctx).apply {
-                settings.javaScriptEnabled = false
+                settings.javaScriptEnabled = true
                 settings.allowContentAccess = true
                 enableZoom()
                 webViewClient = object : WebViewClient() {
