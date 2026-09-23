@@ -203,7 +203,6 @@ class AnalyticsImportService : Service() {
         AnalyticsImportBus.setRunning(true)
         serviceScope.launch {
             try {
-                updateNotification("Собираю отчёт: $account")
                 // Отчёт строит ТОТ ЖЕ build_report.py, что и на десктопе (запускается на
                 // устройстве через Chaquopy, см. PythonReportBuilder) -- схема on-device БД
                 // полностью совместима (AnalyticsDb.DB_VERSION=6), поэтому строкам с ручным
@@ -213,8 +212,18 @@ class AnalyticsImportService : Service() {
                 val dir = File(application.filesDir, "reports").apply { mkdirs() }
                 val safe = account.trim().lowercase().replace(Regex("[^a-z0-9]"), "_").ifBlank { "account" }
                 val file = File(dir, "report_$safe.html")
-                withContext(Dispatchers.IO) {
-                    PythonReportBuilder.build(application, dbFile, file)
+                // Кэш: пересобирать HTML (секунды-десятки секунд на графики/расчёты, см.
+                // PythonReportBuilder) есть смысл только если БД аккаунта изменилась с прошлой
+                // сборки. Сравниваем mtime файла БД с mtime уже готового отчёта -- если отчёт
+                // не старше БД, отдаём его как есть, ничего не запуская.
+                val cacheValid = file.exists() && dbFile.exists() && file.lastModified() >= dbFile.lastModified()
+                if (cacheValid) {
+                    AnalyticsImportBus.appendLog("База не менялась - открываю уже готовый отчёт.")
+                } else {
+                    updateNotification("Собираю отчёт: $account")
+                    withContext(Dispatchers.IO) {
+                        PythonReportBuilder.build(application, dbFile, file)
+                    }
                 }
                 AnalyticsImportBus.setReportPath(file.absolutePath)
             } catch (e: Exception) {

@@ -191,6 +191,46 @@ class AnalyticsViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * Экспорт текущей локальной базы аналитики аккаунта в файл, выбранный пользователем через
+     * системный диалог сохранения (см. AnalyticsScreen -- тот же UploadFile-паттерн, что и
+     * импорт выше, только в обратную сторону). Просто копирует файл БД как есть (с тем же
+     * форматом/схемой, что использует сама база на устройстве) -- никакой конвертации не
+     * требуется, т.к. десктопный build_report.py читает обычный SQLite-файл. Блокирует операцию,
+     * пока идёт другой импорт/сборка отчёта, по тем же причинам, что и importDbFromUri.
+     */
+    fun exportDbToUri(account: String, uri: android.net.Uri) {
+        if (account.isBlank()) {
+            AnalyticsImportBus.appendLog("Не выбран аккаунт - экспорт базы отменён.")
+            return
+        }
+        if (AnalyticsImportBus.isRunning.value) {
+            AnalyticsImportBus.appendLog("Уже выполняется другая операция аналитики - подождите её завершения.")
+            return
+        }
+        AnalyticsImportBus.setRunning(true)
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val srcFile = AnalyticsDb.dbFileForAccount(app, account)
+                    if (!srcFile.exists()) {
+                        throw RuntimeException("Локальная база аккаунта $account ещё пуста - нечего экспортировать")
+                    }
+                    val out = app.contentResolver.openOutputStream(uri)
+                        ?: throw RuntimeException("Не удалось открыть файл для записи")
+                    out.use { output ->
+                        srcFile.inputStream().use { input -> input.copyTo(output) }
+                    }
+                }
+                AnalyticsImportBus.appendLog("База аналитики экспортирована в файл для аккаунта $account.")
+            } catch (e: Exception) {
+                AnalyticsImportBus.appendLog("Ошибка экспорта базы: ${e.message}")
+            } finally {
+                AnalyticsImportBus.setRunning(false)
+            }
+        }
+    }
+
     /** Запускает foreground-сервис на импорт указанного периода (см. class doc выше). */
     fun importActivities(
         account: String,

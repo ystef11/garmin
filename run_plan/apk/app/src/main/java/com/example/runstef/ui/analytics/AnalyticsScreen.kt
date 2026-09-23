@@ -1,11 +1,16 @@
 package com.example.runstef.ui.analytics
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,11 +18,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -25,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,6 +52,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.clip
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.runstef.ui.common.GarminAccountSelector
 import java.time.Instant
@@ -79,7 +89,8 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
 
     var startDate by rememberSaveable { mutableStateOf("") }
     var endDate by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
-    var withWellness by rememberSaveable { mutableStateOf(true) }
+    // Больше не переключается пользователем - по умолчанию всегда выгружаем всё (включая самочувствие).
+    val withWellness = true
     var forceRefresh by rememberSaveable { mutableStateOf(false) }
 
     val logLines by vm.log.collectAsState()
@@ -160,27 +171,103 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
                     modifier = Modifier.weight(1f)
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                Checkbox(checked = withWellness, onCheckedChange = { withWellness = it })
-                Text("Выгружать самочувствие (RHR/HRV)")
-            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = forceRefresh, onCheckedChange = { forceRefresh = it })
                 Text("Перевыгрузить/перезаписать уже загруженные дни этого периода")
             }
 
-            Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                OutlinedButton(
-                    enabled = !isRunning && account.isNotBlank() && startDate.isNotBlank(),
-                    onClick = {
-                        val s = runCatching { LocalDate.parse(startDate) }.getOrNull()
-                        val e = runCatching { LocalDate.parse(endDate) }.getOrNull() ?: LocalDate.now()
-                        if (s != null) {
-                            vm.importActivities(account.trim(), s, e, withWellness, forceRefresh)
+            var showImportMenu by remember { mutableStateOf(false) }
+            var showImportConfirm by remember { mutableStateOf<android.net.Uri?>(null) }
+            val importDbLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.OpenDocument()
+            ) { uri -> if (uri != null) showImportConfirm = uri }
+            val exportDbLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+            ) { uri -> if (uri != null) vm.exportDbToUri(account.trim(), uri) }
+
+            // Визуально единая "капсула" (как в стандартных split-button из Material) - общая
+            // рамка/скругление на весь Row, а не два отдельных OutlinedButton рядом: внутри
+            // тонкий вертикальный разделитель между текстовой частью и стрелкой раскрытия меню.
+            val importButtonEnabled = !isRunning && account.isNotBlank() && startDate.isNotBlank()
+            val importMenuEnabled = account.isNotBlank() && !isRunning
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp)
+                    .height(IntrinsicSize.Min)
+                    .clip(RoundedCornerShape(50))
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outline,
+                        shape = RoundedCornerShape(50)
+                    )
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable(enabled = importButtonEnabled) {
+                            val s = runCatching { LocalDate.parse(startDate) }.getOrNull()
+                            val e = runCatching { LocalDate.parse(endDate) }.getOrNull() ?: LocalDate.now()
+                            if (s != null) {
+                                vm.importActivities(account.trim(), s, e, withWellness, forceRefresh)
+                            }
                         }
-                    },
-                    modifier = Modifier.weight(1f)
-                ) { Text("Импортировать тренировки") }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "Загрузить тренировки",
+                        color = if (importButtonEnabled) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        }
+                    )
+                }
+                VerticalDivider(
+                    modifier = Modifier.fillMaxHeight().padding(vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.outline
+                )
+                Box {
+                    // Стрелка справа от кнопки "Загрузить тренировки" - скрывает редко нужный
+                    // функционал "Импортировать базу из файла..." (отдельная кнопка убрана по
+                    // запросу пользователя), но сама возможность осталась доступна через это меню.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .clickable(enabled = importMenuEnabled) { showImportMenu = true }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.ArrowDropDown,
+                            contentDescription = "Ещё способы загрузки",
+                            tint = if (importMenuEnabled) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            }
+                        )
+                    }
+                    DropdownMenu(expanded = showImportMenu, onDismissRequest = { showImportMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Импортировать базу из файла...") },
+                            onClick = {
+                                showImportMenu = false
+                                importDbLauncher.launch(arrayOf("*/*"))
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Экспортировать базу в файл...") },
+                            enabled = importMenuEnabled,
+                            onClick = {
+                                showImportMenu = false
+                                exportDbLauncher.launch("garmin_${account.trim()}.db")
+                            }
+                        )
+                    }
+                }
             }
             // ГЛАВНОЕ действие вкладки - построение отчёта (по запросу пользователя 2026-08-23:
             // "так же выделена кнопка 'импортировать тренировки', хотя главная - 'построить
@@ -191,15 +278,6 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
             ) { Text("Построить отчёт") }
 
-            var showImportConfirm by remember { mutableStateOf<android.net.Uri?>(null) }
-            val importDbLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.OpenDocument()
-            ) { uri -> if (uri != null) showImportConfirm = uri }
-            OutlinedButton(
-                enabled = account.isNotBlank() && !isRunning,
-                onClick = { importDbLauncher.launch(arrayOf("*/*")) },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-            ) { Text("Импортировать базу из файла...") }
             if (showImportConfirm != null) {
                 AlertDialog(
                     onDismissRequest = { showImportConfirm = null },

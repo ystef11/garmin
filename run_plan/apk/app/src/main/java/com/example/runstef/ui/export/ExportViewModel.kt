@@ -51,8 +51,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
         apiKey: String,
         athleteId: String,
         skipCross: Set<String>,
-        dryRun: Boolean,
-        clear: Boolean
+        dryRun: Boolean
     ) {
         if (_isRunning.value) return
         _isRunning.value = true
@@ -62,7 +61,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
                 settings.saveIntervalsCreds(apiKey, athleteId)
                 val api = IntervalsApi(apiKey, athleteId, log = ::appendLog)
                 withContext(Dispatchers.IO) {
-                    api.upload(plan, skipCross, dryRun, clear)
+                    api.upload(plan, skipCross, dryRun)
                 }
             } catch (e: Exception) {
                 appendLog("ОШИБКА: ${e.message}")
@@ -78,10 +77,8 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
         skipCross: Set<String>,
         dryRun: Boolean,
         testFirstWeek: Boolean,
-        clearAll: Boolean,
-        clearPast: Boolean,
-        clearBefore: LocalDate?,
-        allDates: Boolean = false
+        allDates: Boolean = false,
+        fromDate: LocalDate? = null
     ) {
         if (_isRunning.value) return
         _isRunning.value = true
@@ -109,7 +106,7 @@ class ExportViewModel(application: Application) : AndroidViewModel(application) 
                 settings.saveLastGarminAccount(account)
                 val api = GarminApi(auth, log = ::appendLog)
                 withContext(Dispatchers.IO) {
-                    api.upload(plan, tokens!!, skipCross, dryRun, testFirstWeek, clearAll, clearPast, clearBefore, allDates)
+                    api.upload(plan, tokens!!, skipCross, dryRun, testFirstWeek, allDates, fromDate)
                 }
             } catch (e: Exception) {
                 appendLog("ОШИБКА: ${e.message}")

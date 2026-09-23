@@ -1,5 +1,6 @@
 package com.example.runstef.ui.export
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -71,7 +72,10 @@ fun ExportScreen(preselectedFilePath: String? = null) {
         }
     }
 
+    // Общие для обеих вкладок опции. dryRun/testFirstWeek — отладочные, скрыты в
+    // сворачиваемом разделе «Отладка»; testFirstWeek реально используется только Garmin-веткой.
     var dryRun by rememberSaveable { mutableStateOf(false) }
+    var testFirstWeek by rememberSaveable { mutableStateOf(false) }
     val skipCross = remember { mutableStateOf(setOf<String>()) }
     var tabIndex by rememberSaveable { mutableStateOf(0) }
 
@@ -84,13 +88,19 @@ fun ExportScreen(preselectedFilePath: String? = null) {
             PlanPicker(plans, selectedPlan, onSelect = { selectedPlan = it })
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-            Text("Общие опции", style = MaterialTheme.typography.titleMedium)
-            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Checkbox(checked = dryRun, onCheckedChange = { dryRun = it })
-                Text("Тестовый прогон (ничего не отправлять)")
+            ExpandableSection(title = "Пропустить кросс") {
+                CrossTypeChips(selected = skipCross.value, onChange = { skipCross.value = it })
             }
-            Text("Пропустить кросс:", style = MaterialTheme.typography.bodyMedium)
-            CrossTypeChips(selected = skipCross.value, onChange = { skipCross.value = it })
+            ExpandableSection(title = "Отладка") {
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Checkbox(checked = dryRun, onCheckedChange = { dryRun = it })
+                    Text("Тестовый прогон (ничего не отправлять)")
+                }
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Checkbox(checked = testFirstWeek, onCheckedChange = { testFirstWeek = it })
+                    Text("Только первая неделя (Garmin)")
+                }
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
             SecondaryTabRow(selectedTabIndex = tabIndex) {
@@ -103,9 +113,9 @@ fun ExportScreen(preselectedFilePath: String? = null) {
                 GarminTab(
                     initialAccounts = vm.savedGarminAccounts(),
                     enabled = !isRunning && plan != null,
-                    onSubmit = { account, testFirstWeek, clearAll, clearPast, before, allDates ->
+                    onSubmit = { account, allDates, fromDate ->
                         plan?.let {
-                            vm.exportToGarmin(it, account, skipCross.value, dryRun, testFirstWeek, clearAll, clearPast, before, allDates)
+                            vm.exportToGarmin(it, account, skipCross.value, dryRun, testFirstWeek, allDates, fromDate)
                         }
                     }
                 )
@@ -113,8 +123,8 @@ fun ExportScreen(preselectedFilePath: String? = null) {
                 IntervalsTab(
                     vm = vm,
                     enabled = !isRunning && plan != null,
-                    onSubmit = { apiKey, athlete, clear ->
-                        plan?.let { vm.exportToIntervals(it, apiKey, athlete, skipCross.value, dryRun, clear) }
+                    onSubmit = { apiKey, athlete ->
+                        plan?.let { vm.exportToIntervals(it, apiKey, athlete, skipCross.value, dryRun) }
                     }
                 )
             }
@@ -125,6 +135,32 @@ fun ExportScreen(preselectedFilePath: String? = null) {
             LazyColumn(modifier = Modifier.fillMaxWidth().height(220.dp)) {
                 items(logLines) { line -> Text(line, style = MaterialTheme.typography.bodySmall) }
             }
+        }
+    }
+}
+
+/** Сворачиваемый раздел опций (кросс-фильтр, отладочные флаги) — чтобы не занимать место
+ * на экране, когда не нужен. Свёрнут по умолчанию. */
+@Composable
+private fun ExpandableSection(
+    title: String,
+    initiallyExpanded: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = 8.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Text(if (expanded) "▾" else "▸", modifier = Modifier.padding(end = 8.dp))
+            Text(title, style = MaterialTheme.typography.titleMedium)
+        }
+        if (expanded) {
+            Column(modifier = Modifier.padding(start = 8.dp, bottom = 4.dp)) { content() }
         }
     }
 }
@@ -183,15 +219,12 @@ private fun CrossTypeChips(selected: Set<String>, onChange: (Set<String>) -> Uni
 private fun GarminTab(
     initialAccounts: List<String>,
     enabled: Boolean,
-    onSubmit: (account: String, testFirstWeek: Boolean, clearAll: Boolean, clearPast: Boolean, before: java.time.LocalDate?, allDates: Boolean) -> Unit
+    onSubmit: (account: String, allDates: Boolean, fromDate: java.time.LocalDate?) -> Unit
 ) {
     var savedAccounts by remember { mutableStateOf(initialAccounts) }
     var account by remember { mutableStateOf(savedAccounts.firstOrNull() ?: "") }
-    var testFirstWeek by remember { mutableStateOf(false) }
     var allDates by remember { mutableStateOf(false) }
-    var clearAll by remember { mutableStateOf(false) }
-    var clearPast by remember { mutableStateOf(false) }
-    var beforeDate by remember { mutableStateOf("") }
+    var fromDateStr by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
         GarminAccountSelector(
@@ -204,40 +237,29 @@ private fun GarminTab(
             }
         )
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-            Checkbox(checked = testFirstWeek, onCheckedChange = { testFirstWeek = it })
-            Text("Только первая неделя")
-        }
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Checkbox(checked = allDates, onCheckedChange = { allDates = it })
             Text("Весь план целиком (включая прошедшие даты)")
         }
-        Text(
-            "По умолчанию отправляются только тренировки с датой не раньше сегодняшней; уже " +
-                "загруженные тренировки с такими же именами перед отправкой удаляются автоматически " +
-                "(без дублей).",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-            Checkbox(checked = clearAll, onCheckedChange = { clearAll = it; if (it) clearPast = false })
-            Text("Удалить все тренировки плана перед загрузкой")
-        }
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Checkbox(checked = clearPast, onCheckedChange = { clearPast = it; if (it) clearAll = false })
-            Text("Удалить только прошедшие")
-        }
-        if (clearPast) {
+        if (!allDates) {
             OutlinedTextField(
-                value = beforeDate, onValueChange = { beforeDate = it },
-                label = { Text("до: ГГГГ-ММ-ДД (пусто = сегодня)") },
-                modifier = Modifier.fillMaxWidth()
+                value = fromDateStr, onValueChange = { fromDateStr = it },
+                label = { Text("с даты: ГГГГ-ММ-ДД (пусто = сегодня)") },
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
             )
         }
+        Text(
+            "Перед загрузкой уже загруженные тренировки этого плана с такими же именами " +
+                "удаляются автоматически — повторная загрузка не создаёт дублей и подхватывает " +
+                "изменения плана.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp)
+        )
         Button(
             enabled = enabled && account.isNotBlank(),
             onClick = {
-                val before = beforeDate.takeIf { it.isNotBlank() }?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
-                onSubmit(account.trim(), testFirstWeek, clearAll, clearPast, before, allDates)
+                val fromDate = fromDateStr.takeIf { it.isNotBlank() }?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
+                onSubmit(account.trim(), allDates, fromDate)
             },
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
         ) { Text("Отправить в Garmin Connect") }
@@ -248,11 +270,10 @@ private fun GarminTab(
 private fun IntervalsTab(
     vm: ExportViewModel,
     enabled: Boolean,
-    onSubmit: (apiKey: String, athlete: String, clear: Boolean) -> Unit
+    onSubmit: (apiKey: String, athlete: String) -> Unit
 ) {
     var apiKey by remember { mutableStateOf("") }
     var athlete by remember { mutableStateOf("") }
-    var clear by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
@@ -273,13 +294,16 @@ private fun IntervalsTab(
             label = { Text("Athlete ID (например i123456)") },
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
         )
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Checkbox(checked = clear, onCheckedChange = { clear = it })
-            Text("Удалить ранее загруженные события плана перед загрузкой")
-        }
+        Text(
+            "Перед загрузкой ранее загруженные события этого плана удаляются автоматически " +
+                "— повторная загрузка не создаёт дублей.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp)
+        )
         Button(
             enabled = enabled && apiKey.isNotBlank() && athlete.isNotBlank(),
-            onClick = { onSubmit(apiKey.trim(), athlete.trim(), clear) },
+            onClick = { onSubmit(apiKey.trim(), athlete.trim()) },
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
         ) { Text("Отправить в intervals.icu") }
     }

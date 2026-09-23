@@ -163,7 +163,7 @@ class IntervalsApi(
 
     data class Result(val ok: Int = 0, val cleared: Int = 0, val dryRun: Boolean = false, val count: Int = 0)
 
-    fun upload(plan: RunPlan, skipCross: Set<String>, dryRun: Boolean, clear: Boolean): Result {
+    fun upload(plan: RunPlan, skipCross: Set<String>, dryRun: Boolean): Result {
         val tag = plan.meta.tag
         val events = plan.workouts.mapNotNull { eventFor(it, skipCross) }.sortedBy { it.startDateLocal }
         if (events.isEmpty()) throw RuntimeException("В плане нет тренировок для импорта.")
@@ -184,21 +184,21 @@ class IntervalsApi(
         }
 
         val evUrl = "$BASE/athlete/$athleteId/events"
+        // Перед загрузкой всегда чистим ранее загруженные события этого плана в
+        // затрагиваемом диапазоне дат — защита от дублей при повторном запуске/перезаливке.
         var cleared = 0
-        if (clear) {
-            val listJson = request("GET", "$evUrl?oldest=$d0&newest=$d1&category=WORKOUT")
-            val arr = runCatching { Json.parseToJsonElement(listJson).jsonArray }.getOrNull()
-            arr?.forEach { el ->
-                val obj = el.jsonObject
-                val name = obj["name"]?.jsonPrimitive?.content ?: ""
-                if (name.startsWith(tag)) {
-                    val id = obj["id"]?.jsonPrimitive?.content ?: obj["id"].toString()
-                    request("DELETE", "$evUrl/$id")
-                    cleared++
-                }
+        val listJson = request("GET", "$evUrl?oldest=$d0&newest=$d1&category=WORKOUT")
+        val arr = runCatching { Json.parseToJsonElement(listJson).jsonArray }.getOrNull()
+        arr?.forEach { el ->
+            val obj = el.jsonObject
+            val name = obj["name"]?.jsonPrimitive?.content ?: ""
+            if (name.startsWith(tag)) {
+                val id = obj["id"]?.jsonPrimitive?.content ?: obj["id"].toString()
+                request("DELETE", "$evUrl/$id")
+                cleared++
             }
-            log("Удалено ранее загруженных событий этого плана: $cleared")
         }
+        if (cleared > 0) log("Удалено ранее загруженных событий этого плана: $cleared")
 
         var ok = 0
         for (e in events) {

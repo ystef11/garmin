@@ -48,7 +48,8 @@ android {
 
 chaquopy {
     defaultConfig {
-        version = "3.11"
+        version = "3.13"
+        buildPython("py", "-3.13")
         pip {
             // Та же тройка, что использует десктопный build_report.py -- матплотлиб тянет
             // свои C-зависимости (kiwisolver, pillow, fonttools, contourpy) сам.

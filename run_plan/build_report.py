@@ -148,8 +148,14 @@ def load_data(db_path, json_path=None):
     )
     # wellness.rhr — нужен для карвоненовских (%HRR) пульсовых зон (см. build_zones, диалог
     # 2026-08-18): резерв пульса = max_hr - rhr, а не только max_hr, как раньше.
+    # stress_avg/body_battery_* — фоновая нагрузка вне бега, накладывается на ACWR (раздел 9в).
+    # Фильтр по rhr не ставим на весь запрос (estimate_resting_hr сам делает notna по rhr) —
+    # иначе теряются дни со stress/body battery, но без rhr.
     wellness = pd.read_sql_query(
-        "SELECT date, rhr FROM wellness WHERE rhr IS NOT NULL ORDER BY date", conn,
+        "SELECT date, rhr, stress_avg, body_battery_charged, body_battery_drained, "
+        "body_battery_min, hrv_last_night_avg, hrv_weekly_avg, hrv_status, "
+        "sleep_score, sleep_duration_s FROM wellness "
+        "ORDER BY date", conn,
         parse_dates=["date"]
     )
     conn.close()
@@ -1324,8 +1330,30 @@ def compute_acwr(activities):
     return acwr_load, acwr_km
 
 
-def plot_acwr(acwr_load, acwr_km, xlim=None):
-    fig, axes = plt.subplots(2, 1, figsize=(11, 5.2), sharex=True)
+def plot_acwr(acwr_load, acwr_km, wellness=None, xlim=None):
+    # 9в (опционально, если в wellness есть stress_avg/body_battery): фоновая нагрузка ВНЕ бега
+    # (стресс и расход Body Battery за день) — накладывается на тот же daily-индекс, что и ACWR,
+    # чтобы видно было, не растёт ли тренировочный ACWR на фоне уже истощённого фонового резерва.
+    # 9г (опционально, если в wellness есть hrv_*): HRV — тот же daily-индекс, статус Гармина
+    # (BALANCED/UNBALANCED/LOW) закрашен фоном, чтобы протяжённые периоды разбалансировки было
+    # видно на глаз, а не только по цифре.
+    has_wellness_panel = (
+        wellness is not None and len(wellness)
+        and wellness[["stress_avg", "body_battery_drained"]].notna().any().any()
+    )
+    has_hrv_panel = (
+        wellness is not None and len(wellness)
+        and "hrv_last_night_avg" in wellness and wellness["hrv_last_night_avg"].notna().any()
+    )
+    # 9д (опционально, если в wellness есть sleep_score/sleep_duration_s): качество и
+    # продолжительность сна — фон закрашен по стандартным порогам sleep_score Гармина
+    # (не подогнано под конкретного атлета), длительность — вторая ось с ориентиром 7-9ч.
+    has_sleep_panel = (
+        wellness is not None and len(wellness)
+        and "sleep_score" in wellness and wellness["sleep_score"].notna().any()
+    )
+    n_panels = 2 + int(has_wellness_panel) + int(has_hrv_panel) + int(has_sleep_panel)
+    fig, axes = plt.subplots(n_panels, 1, figsize=(11, 2.55 * n_panels), sharex=True)
     for ax, series, title, color in [
         (axes[0], acwr_load, "9а. ACWR по Garmin training load (7д/28д)", "#E0574C"),
         (axes[1], acwr_km, "9б. ACWR по объёму (км, с учётом калибровки дорожки, 7д/28д)", "#3B7DD8"),
@@ -1338,8 +1366,105 @@ def plot_acwr(acwr_load, acwr_km, xlim=None):
         ax.set_ylabel("ACWR")
         ax.set_ylim(0, min(4, np.nanmax(series.values) * 1.1 if len(series) else 3))
         ax.legend(loc="upper left", fontsize=7)
-    axes[1].xaxis.set_major_locator(mdates.MonthLocator(interval=2))
-    axes[1].xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+
+    next_panel = 2
+    idx = acwr_load.index  # тот же daily-индекс, что у ACWR — все панели выравнены по оси X
+    w = None
+    if has_wellness_panel or has_hrv_panel or has_sleep_panel:
+        w = wellness.dropna(subset=["date"]).set_index("date").sort_index()
+        w = w[~w.index.duplicated(keep="last")]
+
+    if has_wellness_panel:
+        ax3 = axes[next_panel]
+        next_panel += 1
+        # 14-дневное скольжение (не 7, как у стресса) — сглаживает дневной шум Body Battery.
+        stress = w["stress_avg"].reindex(idx).rolling(7, min_periods=1).mean()
+        bb_net = (w["body_battery_charged"] - w["body_battery_drained"]).reindex(idx).rolling(
+            14, min_periods=1
+        ).mean()
+        ax3.plot(idx, stress.values, color="#E0A62C", linewidth=1.3, label="Стресс, ср. за день (7д скольз.)")
+        ax3b = ax3.twinx()
+        ax3b.plot(
+            idx, bb_net.values, color="#7B4FA6", linewidth=1.6,
+            label="Body Battery: заряжено − потрачено за день (14д скольз.)"
+        )
+        ax3b.axhline(0, color="#7B4FA6", linewidth=0.6, alpha=0.4)
+        ax3.set_title("9в. Фоновая нагрузка вне бега: стресс и баланс Body Battery")
+        ax3.set_ylabel("Stress avg, 0-100", color="#E0A62C")
+        ax3b.set_ylabel("Body Battery, баланс/день", color="#7B4FA6")
+        lines1, labels1 = ax3.get_legend_handles_labels()
+        lines2, labels2 = ax3b.get_legend_handles_labels()
+        ax3.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=7)
+
+    if has_hrv_panel:
+        ax4 = axes[next_panel]
+        next_panel += 1
+        hrv_raw = w["hrv_last_night_avg"].reindex(idx)
+        hrv_weekly = w["hrv_weekly_avg"].reindex(idx)
+        status_color = {"BALANCED": "#4CA64C", "UNBALANCED": "#E0A62C", "LOW": "#D9453D"}
+        status = w["hrv_status"].reindex(idx)
+        start = 0
+        cur = status.iloc[0] if len(status) else None
+        for i in range(1, len(idx) + 1):
+            s = status.iloc[i] if i < len(idx) else None
+            if s != cur:
+                color = status_color.get(cur)
+                if color:
+                    ax4.axvspan(idx[start], idx[i - 1] + pd.Timedelta(days=1), color=color, alpha=0.15, linewidth=0)
+                start, cur = i, s
+        ax4.plot(idx, hrv_raw.values, color="#888888", linewidth=0.6, alpha=0.6, label="HRV, ночной (сырой)")
+        ax4.plot(idx, hrv_weekly.values, color="#2C5FA6", linewidth=1.8, label="HRV, недельное сглаживание (Garmin)")
+        ax4.set_title("9г. HRV (вариабельность пульса) и статус баланса ЦНС")
+        ax4.set_ylabel("HRV, ms")
+        ax4.legend(loc="upper left", fontsize=7)
+
+    if has_sleep_panel:
+        ax5 = axes[next_panel]
+        next_panel += 1
+        score_raw = w["sleep_score"].reindex(idx)
+        score_roll = score_raw.rolling(7, min_periods=1).mean()
+        duration_h = (w["sleep_duration_s"] / 3600.0).reindex(idx) if "sleep_duration_s" in w else None
+        # Стандартные пороги Гармина для sleep_score (не подогнаны под конкретного атлета).
+        bands = [(0, 60, "#D9453D"), (60, 80, "#E0A62C"), (80, 101, "#4CA64C")]
+        score_for_band = score_raw.copy()
+        start = 0
+
+        def band_of(v):
+            if pd.isna(v):
+                return None
+            for lo, hi, color in bands:
+                if lo <= v < hi:
+                    return color
+            return None
+
+        cur = band_of(score_for_band.iloc[0]) if len(score_for_band) else None
+        for i in range(1, len(idx) + 1):
+            b = band_of(score_for_band.iloc[i]) if i < len(idx) else None
+            if b != cur:
+                if cur:
+                    ax5.axvspan(idx[start], idx[i - 1] + pd.Timedelta(days=1), color=cur, alpha=0.12, linewidth=0)
+                start, cur = i, b
+        ax5.plot(idx, score_raw.values, color="#888888", linewidth=0.5, alpha=0.5, label="Sleep score, сырой")
+        ax5.plot(idx, score_roll.values, color="#2C7A5C", linewidth=1.8, label="Sleep score, 7д скольз.")
+        ax5.set_title("9д. Сон: качество (score) и продолжительность")
+        ax5.set_ylabel("Sleep score, 0-100", color="#2C7A5C")
+        ax5.set_ylim(0, 100)
+        if duration_h is not None and duration_h.notna().any():
+            ax5b = ax5.twinx()
+            ax5b.plot(
+                idx, duration_h.rolling(7, min_periods=1).mean().values, color="#3B7DD8",
+                linewidth=1.5, label="Длительность сна, ч (7д скольз.)"
+            )
+            ax5b.axhspan(7, 9, color="#3B7DD8", alpha=0.06)
+            ax5b.set_ylabel("Сон, часов/ночь", color="#3B7DD8")
+            lines1, labels1 = ax5.get_legend_handles_labels()
+            lines2, labels2 = ax5b.get_legend_handles_labels()
+            ax5.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=7)
+        else:
+            ax5.legend(loc="upper left", fontsize=7)
+
+    axes[-1].xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+    axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
     if xlim:
         # daily-ряд ACWR (7д/28д) начинается/заканчивается на 1 день уже, чем недельные графики
         # отчёта (см. compute_acwr: reindex по daily_load.index.min()/max(), а не по общей
@@ -1348,6 +1473,131 @@ def plot_acwr(acwr_load, acwr_km, xlim=None):
     fig.autofmt_xdate()
     fig.tight_layout()
     return fig_to_base64(fig)
+
+
+def _percentile_rank(recent_mean, hist_series):
+    """Где среднее за недавний период лежит относительно ВСЕЙ собственной истории атлета
+    (0-100). Не абсолютный порог, а сравнение с самим собой — одинаково работает для
+    любых входных данных, не подогнано под конкретные значения."""
+    hist = hist_series.dropna()
+    if len(hist) < 10 or pd.isna(recent_mean):
+        return None
+    return float((hist < recent_mean).mean() * 100)
+
+
+def recovery_status_summary(acwr_load, acwr_km, wellness, recent_days=28):
+    """Данные-ориентированный итог раздела 9: не хардкодит никаких чисел под конкретного
+    атлета — ACWR сравнивается со стандартными спортивно-физиологическими порогами (0.8/1.3/1.5,
+    те же, что нарисованы на графике), а стресс/Body Battery/HRV/сон сравниваются с СОБСТВЕННОЙ
+    историей атлета через перцентиль (recent vs весь ряд) — работает одинаково на любых входных
+    данных. Возвращает список (severity, text), severity in {"risk","watch","ok"}."""
+    findings = []
+
+    for label, series in [
+        ("тренировочная нагрузка (Garmin load)", acwr_load),
+        ("объём (км)", acwr_km),
+    ]:
+        s = series.dropna()
+        if not len(s):
+            continue
+        recent = s.iloc[-recent_days:] if len(s) >= recent_days else s
+        last_val = float(s.iloc[-1])
+        frac_over = float((recent > 1.5).mean())
+        frac_under = float((recent < 0.8).mean())
+        if last_val > 1.5 or frac_over >= 0.3:
+            findings.append((
+                "risk",
+                f"ACWR по {label}: сейчас {last_val:.2f}, выше порога перегрузки (1.5) "
+                f"{frac_over * 100:.0f}% дней за последние {len(recent)} — повышенный риск "
+                "травмы/перетренированности."
+            ))
+        elif last_val < 0.8 and frac_under >= 0.5:
+            findings.append((
+                "watch",
+                f"ACWR по {label}: сейчас {last_val:.2f}, устойчиво ниже 0.8 последние "
+                f"{len(recent)} дней — есть резерв для наращивания нагрузки."
+            ))
+        else:
+            findings.append((
+                "ok",
+                f"ACWR по {label}: сейчас {last_val:.2f}, в пределах нормы (0.8-1.3)."
+            ))
+
+    if wellness is None or not len(wellness):
+        return findings
+
+    w = wellness.dropna(subset=["date"]).set_index("date").sort_index()
+    w = w[~w.index.duplicated(keep="last")]
+    if not len(w):
+        return findings
+    cutoff = w.index.max() - pd.Timedelta(days=recent_days)
+
+    def flag_metric(col, label, unit, worse_is_low):
+        if col not in w.columns or w[col].notna().sum() < 10:
+            return
+        recent_mean = w.loc[w.index > cutoff, col].mean()
+        pct = _percentile_rank(recent_mean, w[col])
+        if pct is None:
+            return
+        val_txt = f"{recent_mean:.1f}{unit}"
+        if worse_is_low and pct <= 20:
+            findings.append((
+                "risk" if pct <= 10 else "watch",
+                f"{label}: последние {recent_days} дн. в среднем {val_txt} — "
+                f"ниже {pct:.0f}-го перцентиля собственной истории, заметно хуже обычного."
+            ))
+        elif (not worse_is_low) and pct >= 80:
+            findings.append((
+                "risk" if pct >= 90 else "watch",
+                f"{label}: последние {recent_days} дн. в среднем {val_txt} — "
+                f"выше {pct:.0f}-го перцентиля собственной истории, заметно выше обычного."
+            ))
+        else:
+            findings.append((
+                "ok",
+                f"{label}: последние {recent_days} дн. в среднем {val_txt} — "
+                f"в пределах обычного диапазона (перцентиль {pct:.0f})."
+            ))
+
+    flag_metric("stress_avg", "Фоновый стресс", "", worse_is_low=False)
+    if {"body_battery_charged", "body_battery_drained"} <= set(w.columns):
+        w["_bb_net"] = w["body_battery_charged"] - w["body_battery_drained"]
+        flag_metric("_bb_net", "Баланс Body Battery (заряжено−потрачено)", "", worse_is_low=True)
+    flag_metric("hrv_weekly_avg", "HRV", " мс", worse_is_low=True)
+    flag_metric("sleep_score", "Качество сна (score)", "", worse_is_low=True)
+    if "sleep_duration_s" in w.columns:
+        w["_sleep_h"] = w["sleep_duration_s"] / 3600.0
+        flag_metric("_sleep_h", "Продолжительность сна", " ч", worse_is_low=True)
+
+    if "hrv_status" in w.columns and w["hrv_status"].notna().sum() >= 10:
+        recent_w = w[w.index > cutoff]
+        recent_bad_share = float((recent_w["hrv_status"] != "BALANCED").mean()) if len(recent_w) else float("nan")
+        hist_bad_share = float((w["hrv_status"] != "BALANCED").mean())
+        if not np.isnan(recent_bad_share) and hist_bad_share > 0 and recent_bad_share >= max(0.3, hist_bad_share * 1.5):
+            findings.append((
+                "risk" if recent_bad_share >= 0.6 else "watch",
+                f"HRV-статус: UNBALANCED/LOW {recent_bad_share * 100:.0f}% дней за последние "
+                f"{recent_days} (обычно {hist_bad_share * 100:.0f}%) — организм чаще обычного не в балансе."
+            ))
+
+    return findings
+
+
+def recovery_summary_html(findings, recent_days):
+    if not findings:
+        return ""
+    order = {"risk": 0, "watch": 1, "ok": 2}
+    icon = {"risk": "&#128308;", "watch": "&#128993;", "ok": "&#128994;"}
+    findings_sorted = sorted(findings, key=lambda f: order.get(f[0], 3))
+    items = "".join(f"<li>{icon.get(sev, '')} {text}</li>" for sev, text in findings_sorted)
+    return (
+        f"<p><b>Итог: на что обратить внимание за последние {recent_days} дней</b></p>"
+        f'<p class="meta">Автоматически посчитано по тем же данным, что и графики 9а-9д ниже: ACWR — '
+        "против стандартных спортивных порогов (0.8/1.3/1.5); стресс/Body Battery/HRV/сон — против "
+        "ВСЕЙ собственной истории атлета (перцентиль недавнего среднего в общем распределении), а не "
+        "против произвольных чисел — поэтому работает одинаково в любой момент истории отчёта.</p>"
+        f"<ul>{items}</ul>"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -2339,22 +2589,47 @@ HTML_HEAD = """<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Отчёт по тренировкам</title>
 <style>
+  * { box-sizing: border-box; }
   body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; max-width: 1150px;
          margin: 0 auto; padding: 24px; color: #222; background: #fafafa; }
   h1 { border-bottom: 3px solid #3B7DD8; padding-bottom: 8px; }
   h2 { margin-top: 40px; color: #1A3A5C; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
   h3 { color: #333; }
   .chart-block { background: white; padding: 16px; margin: 16px 0; border-radius: 8px;
-                 box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
-  table { border-collapse: collapse; width: 100%; margin: 12px 0; background: white; }
-  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 13.5px; }
+                 box-shadow: 0 1px 4px rgba(0,0,0,0.08); max-width: 100%; overflow-x: auto; }
+  img, svg { max-width: 100%; height: auto; }
+  .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 12px 0; }
+  table { border-collapse: collapse; width: 100%; min-width: 480px; margin: 0; background: white; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 13.5px; white-space: nowrap; }
   th { background: #eef3fa; }
   tr:nth-child(even) { background: #f7f9fc; }
   .meta { color: #666; font-size: 13px; }
   .note { background: #fff8e6; border-left: 4px solid #E0A62C; padding: 10px 14px; margin: 12px 0; font-size: 13.5px; }
   ul { font-size: 14px; }
+
+  /* --- узкие экраны (телефоны/планшеты) --- */
+  @media (max-width: 720px) {
+    body { padding: 12px 10px; font-size: 15px; }
+    h1 { font-size: 22px; }
+    h2 { font-size: 18px; margin-top: 28px; }
+    h3 { font-size: 15px; }
+    .chart-block { padding: 10px; margin: 12px 0; border-radius: 6px; }
+    th, td { padding: 5px 7px; font-size: 12.5px; }
+    .note, .meta { font-size: 12.5px; }
+    ul { font-size: 13.5px; padding-left: 20px; }
+    label, select, input { font-size: 13px !important; }
+    select { max-width: 100%; }
+  }
+
+  @media (max-width: 420px) {
+    body { padding: 8px 6px; font-size: 14px; }
+    h1 { font-size: 19px; }
+    h2 { font-size: 16px; }
+    th, td { padding: 4px 6px; font-size: 11.5px; }
+  }
 </style>
 </head>
 <body>
@@ -2559,7 +2834,9 @@ def main(db_path, out_path, json_path=None):
 
     # Раздел 4a/4b (ACWR по нагрузке Garmin и по объёму)
     acwr_load, acwr_km = compute_acwr(activities)
-    charts["5"] = plot_acwr(acwr_load, acwr_km, xlim=WEEKLY_XLIM)
+    charts["5"] = plot_acwr(acwr_load, acwr_km, wellness=wellness, xlim=WEEKLY_XLIM)
+    RECOVERY_RECENT_DAYS = 28
+    recovery_findings = recovery_status_summary(acwr_load, acwr_km, wellness, recent_days=RECOVERY_RECENT_DAYS)
 
     # Раздел 8: темп по зонам, последние 4-8 недель (берём 8)
     WEEKS_BACK_PACE = 8
@@ -2618,27 +2895,19 @@ def main(db_path, out_path, json_path=None):
     # Раздел 1 (ПАНО, было 6)
     html.append('<div class="chart-block">')
     html.append("<h2>1. Пульс ПАНО по непрерывным эффортам ≥ ~35 минут</h2>")
+    html.append(f"<p><b>Итоговая оценка ПАНО, используемая в отчёте: {pano_final} уд/мин.</b> {pano_source_note}</p>")
     min_hr_note = f"&ge;{int(round(pano_table_min_hr))}" if pano_table_min_hr is not None else "без ограничения снизу (нет данных для отступа от ПАНО)"
     html.append(
         f'<p class="meta">Отобраны тренировки длительностью 35-65 минут с устойчиво высоким пульсом '
         f'({min_hr_note}, плато, не интервальная структура) — типичный диапазон 10К-гонок и жёстких '
         'темповых тестов. Порог отступа считается от ПАНО (см. ниже), а не хардкодится.</p>'
     )
-    html.append(tables["3"].to_html(index=False, escape=False))
-    html.append(f"<p><b>Итоговая оценка ПАНО, используемая в отчёте: {pano_final} уд/мин.</b> {pano_source_note}</p>")
+    html.append('<div class="table-wrap">' + tables["3"].to_html(index=False, escape=False) + '</div>')
     html.append("</div>")
 
     # Раздел 2 (оптимальный пульс лёгкого бега, было 7) — общий заголовок, 2а/2б — два независимых метода
     html.append('<div class="chart-block">')
     html.append("<h2>2. Оптимальный пульс лёгкого бега — две независимые проверки</h2>")
-    html.append(
-        '<p class="meta">2а — кросс-секционная проверка: при каком пульсе бег экономичнее ПРЯМО '
-        'СЕЙЧАС (в один момент времени). 2б ниже — продольная проверка: как пульс на лёгких связан '
-        'с изменением формы В БУДУЩЕМ. Обе диагностические — не используются напрямую для построения '
-        'зон в разделе 3 (там — методика Карвонена, см. её обоснование там же); это независимая '
-        'сверка, сходится ли она с результатом Карвонена.</p>'
-    )
-    html.append(img_tag(charts["6"]))
     if peak_found:
         html.append(
             f'<p><b>Пульс, дающий максимальную эффективность на медленном беге: '
@@ -2655,6 +2924,14 @@ def main(db_path, out_path, json_path=None):
             f'<b>медиана пульса лёгких пробежек ~{peak_center} уд/мин</b> — это описательная точка, '
             'а не найденный оптимум (сравнение с зонами раздела 3 — там же).</div>'
         )
+    html.append(
+        '<p class="meta">2а — кросс-секционная проверка: при каком пульсе бег экономичнее ПРЯМО '
+        'СЕЙЧАС (в один момент времени). 2б ниже — продольная проверка: как пульс на лёгких связан '
+        'с изменением формы В БУДУЩЕМ. Обе диагностические — не используются напрямую для построения '
+        'зон в разделе 3 (там — методика Карвонена, см. её обоснование там же); это независимая '
+        'сверка, сходится ли она с результатом Карвонена.</p>'
+    )
+    html.append(img_tag(charts["6"]))
     html.append("</div>")
 
     # Раздел 2б (продольная проверка: пульс на easy по времени под нагрузкой vs отклик формы)
@@ -2674,7 +2951,7 @@ def main(db_path, out_path, json_path=None):
             'для построения зон (см. раздел 3) — только как один из двух независимых аргументов в '
             'пользу того, где проходит граница Z1/Z2 (см. докстринг build_zones).</p>'
         )
-        html.append(tables["6b"].to_html(index=False, escape=False))
+        html.append('<div class="table-wrap">' + tables["6b"].to_html(index=False, escape=False) + '</div>')
         html.append("</div>")
 
     # Раздел 3 (пульсовые зоны и темп по ним, последние недели, было 8)
@@ -2686,6 +2963,7 @@ def main(db_path, out_path, json_path=None):
         f'из раздела 2 составляет {easy_center} уд/мин — '
         f'{"внутри" if z2_lo <= easy_center <= z2_hi else "вне"} границ Z2.'
     )
+    html.append('<div class="table-wrap">' + tables["7"].to_html(index=False, escape=False) + '</div>')
     html.append(
         f'<p class="meta">Z1/Z2/Z3 построены по методике Карвонена (%HRR = резерв пульса = max_hr '
         f'{"−"} rhr): Z2 = 60-70% HRR при rhr={rhr:.0f} уд/мин ({rhr_info["source"]}, '
@@ -2702,7 +2980,6 @@ def main(db_path, out_path, json_path=None):
         f"только по тренировкам с {cutoff_date.strftime('%Y-%m-%d')} (последние 8 недель), "
         f"диапазон = 25-75 перцентиль по сплитам, чтобы отражать актуальную форму, а не всю историю.</p>"
     )
-    html.append(tables["7"].to_html(index=False, escape=False))
     html.append("</div>")
 
     # ---- Блок "Анализ прогресса" (было 3a, 3b, 9) ----
@@ -2711,15 +2988,15 @@ def main(db_path, out_path, json_path=None):
     # Раздел 4 (график EF/VDOT, было 3a)
     html.append('<div class="chart-block">')
     html.append("<h2>4. Тренд эффективности (EF) и VDOT по гонкам — наложение по месяцам между годами</h2>")
+    html.append(img_tag(charts["4a"]))
     html.append(
         '<p class="meta">Оба подграфика — по месяцам (январь-декабрь), с отдельной линией/точками на каждый '
         'год (год = цвет, единый со списком годов внизу графика): так виден и сезонный ход внутри года, и '
         'сравнение одного и того же месяца между годами напрямую, без смешения с многолетним трендом формы.</p>'
     )
-    html.append(img_tag(charts["4a"]))
     if len(tables["4a"]):
         html.append("<h3>Гонки, использованные для VDOT</h3>")
-        html.append(tables["4a"].to_html(index=False, escape=False))
+        html.append('<div class="table-wrap">' + tables["4a"].to_html(index=False, escape=False) + '</div>')
         html.append(
             '<p class="meta">"Срыв темпа" — автоматически обнаруженный участок, где темп резко проседает '
             "БЕЗ соответствующего роста пульса (пульс не растёт или даже падает вместе с замедлением) — "
@@ -2749,7 +3026,7 @@ def main(db_path, out_path, json_path=None):
             '<div class="note">Исключены из VDOT (пульс ниже ожидаемого для эффорта в полную силу '
             'на такой дистанции):</div>'
         )
-        html.append(tables["4a_excluded"].to_html(index=False, escape=False))
+        html.append('<div class="table-wrap">' + tables["4a_excluded"].to_html(index=False, escape=False) + '</div>')
     html.append("</div>")
 
     # Раздел 5 (VO2max-прокси, было 3b)
@@ -2757,11 +3034,10 @@ def main(db_path, out_path, json_path=None):
     html.append("<h2>5. VO2max-прокси по истории ПАНО Garmin</h2>")
     html.append(img_tag(charts["4b"]))
     html.append(
-        '<p class="meta">В выгрузке БД нет прямого поля Garmin vo2max — ни в activities, ни в wellness. '
-        'Единственный собственный фитнес-показатель Гармина в базе — история ПАНО (lactate_threshold, '
-        'считается через Firstbeat по фактическим тренировкам). Эта кривая — VO2max-эквивалент, '
-        'посчитанный из истории ПАНО той же формулой Дэниэлса, что и VDOT в п.4 (эффорт ~60 мин) — '
-        'это оценка, а не собственно внутреннее число Гармина.</p>'
+        '<p class="meta">Единственный собственный фитнес-показатель Гармина в базе — история ПАНО '
+        '(lactate_threshold, считается через Firstbeat по фактическим тренировкам). Эта кривая — '
+        'VO2max-эквивалент, посчитанный из истории ПАНО той же формулой Дэниэлса, что и VDOT в п.4 '
+        '(эффорт ~60 мин) — это оценка, а не собственно внутреннее число Гармина.</p>'
     )
     html.append("</div>")
 
@@ -2815,11 +3091,26 @@ def main(db_path, out_path, json_path=None):
     # Раздел 9 (ACWR, было 4a/4b)
     html.append('<div class="chart-block">')
     html.append("<h2>9. ACWR — острая/хроническая нагрузка</h2>")
+    html.append(recovery_summary_html(recovery_findings, RECOVERY_RECENT_DAYS))
     html.append(img_tag(charts["5"]))
     html.append(
         '<p class="meta">Способ 1: ACWR по тренировочной нагрузке Garmin (activity_training_load). '
         "Способ 2: ACWR по объёму (км, с учётом калибровки дорожки). Зелёная зона 0.8-1.3 — "
-        "оптимальная нагрузка, выше 1.5 — риск перегрузки/травмы.</p>"
+        "оптимальная нагрузка, выше 1.5 — риск перегрузки/травмы. 9в — фоновая нагрузка ВНЕ бега "
+        "(Garmin wellness, не участвует в расчёте ACWR выше, только наложена для контекста): "
+        "средний дневной стресс (скользящее среднее 7 дн.) и баланс Body Battery за день "
+        "(заряжено минус потрачено, скользящее среднее 14 дн.) — устойчиво отрицательный баланс "
+        "или растущий стресс одновременно с высоким ACWR по бегу — сигнал, что фоновое утомление "
+        "(сон, работа, стресс вне тренировок) накладывается на беговую нагрузку, а не только она сама "
+        "по себе. 9г — HRV (вариабельность пульса, wellness.hrv_last_night_avg/hrv_weekly_avg): "
+        "серая линия — сырое ночное значение, синяя — готовое недельное сглаживание от Гармина. Фон "
+        "закрашен по статусу Гармина (hrv_status): зелёный — BALANCED, жёлтый — UNBALANCED, "
+        "красный — LOW — протяжённые не-зелёные периоды, особенно совпадающие с высоким ACWR, "
+        "говорят о недовосстановлении сильнее, чем разовые провалы. 9д — сон "
+        "(wellness.sleep_score/sleep_duration_s): зелёный/жёлтый/красный фон — стандартные пороги "
+        "Гармина для sleep_score (&ge;80 / 60-79 / &lt;60), синяя линия — продолжительность "
+        "сна (правая ось), закрашенный коридор 7-9 ч — общий ориентир нормы для взрослых, "
+        "не подогнан под этого атлета.</p>"
     )
     html.append("</div>")
 
@@ -2844,6 +3135,7 @@ def main(db_path, out_path, json_path=None):
     # Раздел 11: интерактивный график факт (в динамике) vs рекомендовано (выбор дистанции, было 3d)
     html.append('<div class="chart-block">')
     html.append("<h2>11. Факт vs рекомендовано по зонам, в динамике — выбор целевой дистанции</h2>")
+    html.append(zone_time_html)
     html.append(
         '<p class="meta">Факт показан ПО ВРЕМЕНИ (скользящее окно '
         f'{ZONE_TS_WINDOW_WEEKS} недель на каждую неделю истории, то же окно, что и в разделе 8), а '
@@ -2854,7 +3146,6 @@ def main(db_path, out_path, json_path=None):
         'пробежки, где пульс случайно заходил в ту же зону (жара, дрейф, рельеф), маскировали на '
         'этом графике спад качественной работы, видимый в разделе 8.</p>'
     )
-    html.append(zone_time_html)
     html.append("</div>")
 
     # Раздел 12 (текст: оптимальный объём и структура, было 5)
