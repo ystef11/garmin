@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Settings
@@ -28,6 +29,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +49,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
 import com.example.runstef.data.PlanRepository
+import kotlinx.coroutines.launch
 import com.example.runstef.data.VersionCompare
 import com.example.runstef.network.garmin.GarminTokenStore
 import com.example.runstef.ui.analytics.AnalyticsReportScreen
@@ -57,6 +60,7 @@ import com.example.runstef.ui.export.ExportScreen
 import com.example.runstef.ui.home.DEFAULT_PLAN_URL
 import com.example.runstef.ui.home.HomeScreen
 import com.example.runstef.ui.home.HomeViewModel
+import com.example.runstef.ui.home.ToolUrlBuilder
 import com.example.runstef.ui.home.ToolWebViewScreen
 import com.example.runstef.ui.plans.PlanViewScreen
 import com.example.runstef.ui.plans.PlansScreen
@@ -124,6 +128,7 @@ private fun RunstefApp(
     startDestination: String
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val unlocked by authViewModel.unlocked.collectAsState()
 
     // Защита всего приложения включается, только если есть хотя бы один сохранённый аккаунт
@@ -228,7 +233,14 @@ private fun RunstefApp(
             composable(Dest.Home.route) {
                 val homeState by homeViewModel.uiState.collectAsState()
                 HomeScreen(state = homeState, onOpenTool = { tool ->
-                    navController.navigate("tool/${Uri.encode(tool.url)}")
+                    // Калькуляторы plan/hr_pace/weight/rank открываются с уже подставленными
+                    // данными из профиля и аналитики (см. ToolUrlBuilder) — сама сборка URL
+                    // читает локальный профиль/SQLite, поэтому уходит в корутину, чтобы не
+                    // блокировать UI-поток; для остальных инструментов просто возвращает url как есть.
+                    scope.launch {
+                        val url = ToolUrlBuilder.build(context, tool)
+                        navController.navigate("tool/${Uri.encode(url)}")
+                    }
                 })
             }
             composable(
@@ -250,10 +262,15 @@ private fun RunstefApp(
                         // Список инструментов приходит из конфига (см. HomeViewModel) — если он
                         // ещё не загрузился или временно не содержит пункт "plan", используем
                         // тот же fallback-URL, что и во встроенном в apk конфиге.
-                        val planUrl = homeViewModel.uiState.value.tools
-                            .firstOrNull { it.id == "plan" }?.url
-                            ?: DEFAULT_PLAN_URL
-                        navController.navigate("tool/${Uri.encode(planUrl)}")
+                        val planTool = homeViewModel.uiState.value.tools.firstOrNull { it.id == "plan" }
+                            ?: com.example.runstef.ui.home.CalculatorTool(
+                                id = "plan", title = "", subtitle = "", url = DEFAULT_PLAN_URL,
+                                icon = Icons.AutoMirrored.Filled.DirectionsRun
+                            )
+                        scope.launch {
+                            val url = ToolUrlBuilder.build(context, planTool)
+                            navController.navigate("tool/${Uri.encode(url)}")
+                        }
                     },
                     onOpenUrl = { url ->
                         navController.navigate("tool/${Uri.encode(url)}")

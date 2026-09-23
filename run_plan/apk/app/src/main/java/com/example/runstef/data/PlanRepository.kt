@@ -79,6 +79,46 @@ class PlanRepository(private val context: Context) {
         orderPrefs.edit().putString(keyOrder, fileNames.joinToString("\n")).apply()
     }
 
+    // Флаг «основной план» (задаётся в «Мои планы» → ⋮ → «Сделать основным») — та же схема
+    // хранения, что и порядок планов выше: обычные (не зашифрованные) SharedPreferences, только
+    // имя файла плана, без секретных данных. Используется, чтобы понять, из какого плана брать
+    // «тренировку на сегодня» для автозаполнения питания в калькуляторе геля (см. ToolUrlBuilder.buildGel()).
+    private val defaultPlanPrefs get() = context.getSharedPreferences("plan_default", Context.MODE_PRIVATE)
+    private val keyDefaultPlan = "default_plan_file"
+
+    /** Имя файла плана, явно отмеченного пользователем как основной, либо null, если не задавалось. */
+    fun getDefaultPlanFileName(): String? = defaultPlanPrefs.getString(keyDefaultPlan, null)
+
+    /** Отмечает план как основной («Мои планы» → ⋮ → «Сделать основным»). */
+    fun setDefaultPlan(fileName: String) {
+        defaultPlanPrefs.edit().putString(keyDefaultPlan, fileName).apply()
+    }
+
+    /**
+     * Основной план: явно выбранный пользователем (см. [setDefaultPlan]), а если план всего один —
+     * он и считается основным без отдельного выбора (см. project doc "Расположение артефактов" —
+     * "Если планов более 1" — явный выбор нужен, только когда планов несколько). Планов нет или
+     * выбранный ранее файл удалён и планов больше одного — null.
+     */
+    fun getDefaultPlan(): SavedPlan? {
+        val plans = listPlans()
+        if (plans.isEmpty()) return null
+        if (plans.size == 1) return plans.first()
+        val markedName = getDefaultPlanFileName() ?: return null
+        return plans.firstOrNull { it.fileName == markedName }
+    }
+
+    /**
+     * Тренировка на сегодня (по дате устройства, формат совпадает с полем date в PlanWorkout —
+     * см. PlanModels.kt/RunPlan, генерируется как dISO() в run_plan_calculator.html) из основного
+     * плана — используется для автозаполнения питания в калькуляторе геля (см. ToolUrlBuilder).
+     */
+    fun getTodayWorkout(): PlanWorkout? {
+        val plan = getDefaultPlan()?.plan ?: return null
+        val todayIso = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(System.currentTimeMillis())
+        return plan.workouts.firstOrNull { it.date == todayIso }
+    }
+
     fun deletePlan(filePath: String): Boolean = File(filePath).delete()
 
     /** Полный HTML сохранённого плана — для просмотра в WebView. */

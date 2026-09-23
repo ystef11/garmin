@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.example.runstef.MainActivity
@@ -126,7 +125,7 @@ class AnalyticsImportService : Service() {
                 if (tokens != null && auth.isExpired(tokens)) {
                     AnalyticsImportBus.appendLog("Токен истёк, обновляю...")
                     tokens = try {
-                        withContext(Dispatchers.IO) { auth.refresh(tokens!!) }
+                        withContext(Dispatchers.IO) { auth.refresh(tokens) }
                     } catch (e: Exception) {
                         AnalyticsImportBus.appendLog("Не удалось обновить токен (${e.message}), нужен повторный вход.")
                         null
@@ -150,7 +149,7 @@ class AnalyticsImportService : Service() {
                 }
                 AnalyticsImportBus.appendLog("\n[Готово]")
                 AnalyticsImportBus.refreshStats(application, account)
-            } catch (e: ImportCancelledException) {
+            } catch (_: ImportCancelledException) {
                 AnalyticsImportBus.appendLog("\n[Остановлено пользователем] сохранено то, что успели загрузить.")
                 AnalyticsImportBus.refreshStats(application, account)
             } catch (e: Exception) {
@@ -202,7 +201,7 @@ class AnalyticsImportService : Service() {
                 }
                 AnalyticsImportBus.appendLog("[Авто-обновление] готово.")
                 AnalyticsImportBus.refreshStats(application, account)
-            } catch (e: ImportCancelledException) {
+            } catch (_: ImportCancelledException) {
                 AnalyticsImportBus.appendLog("[Авто-обновление] остановлено пользователем.")
                 AnalyticsImportBus.refreshStats(application, account)
             } catch (e: Exception) {
@@ -262,17 +261,17 @@ class AnalyticsImportService : Service() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Импорт аналитики",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Загрузка тренировок из Garmin Connect и сборка отчёта"
-            }
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(channel)
+        // minSdk = 28 (см. app/build.gradle.kts) > VERSION_CODES.O (26) — проверка версии здесь
+        // всегда true, каналы уведомлений существуют на всех поддерживаемых версиях.
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Импорт аналитики",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Загрузка тренировок из Garmin Connect и сборка отчёта"
         }
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(channel)
     }
 
     private fun buildNotification(text: String, percent: Int? = null): Notification {

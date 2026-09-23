@@ -710,6 +710,70 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         return fallbackMaxHr ?: 195
     }
 
+    /** Средний недельный беговой объём (км) за последние [weeks] недель — используется только
+     * для подстановки в калькулятор беговых планов (см. ToolUrlBuilder.kt), НЕ отображается нигде
+     * в самом приложении. sport ИЛИ NULL: часть ручных/старых активностей может быть без поля
+     * sport — не исключаем их, иначе объём занижается. */
+    fun recentWeeklyVolumeKm(weeks: Int = 4): Double? {
+        val last = lastActivityDate() ?: return null
+        val lastDate = runCatching { LocalDate.parse(last.take(10)) }.getOrNull() ?: return null
+        val since = lastDate.minusDays(weeks.toLong() * 7)
+        var totalM = 0.0
+        readableDatabase.rawQuery(
+            """SELECT distance_m FROM activities
+               WHERE date >= ? AND distance_m IS NOT NULL AND (sport IS NULL OR sport = 'running')""",
+            arrayOf(since.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                if (!c.isNull(0)) totalM += c.getDouble(0)
+            }
+        }
+        if (totalM <= 0.0) return null
+        return (totalM / 1000.0) / weeks
+    }
+
+    /** Лучший результат по каждой "табличной" дистанции калькуляторов (см. VdotMath.
+     * ANCHOR_DISTANCES_M) за последние [sinceDays] дней — используется ТОЛЬКО для подстановки
+     * в калькулятор беговых планов и калькулятор разряда (см. ToolUrlBuilder.kt). В отличие от
+     * десктопного build_report.py (race_vdot_points), apk НЕ размечает тренировки как "гонка"
+     * (см. GarminActivitiesApi.classifyByLaps — там только long/interval/threshold/easy/mixed),
+     * поэтому здесь эвристика проще: среди активностей, чья дистанция в пределах ±[tolerance] от
+     * табличной, берём ту, что даёт максимальный VDOT (после отсева слишком лёгких по пульсу,
+     * если известно ПАНО) — то есть фактически лучший результат/прикидку на этой дистанции, а не
+     * обязательно официальную гонку. Возвращает map(anchorDistM -> Pair(лучший VDOT, дата)).
+     */
+    fun bestEffortsByAnchor(sinceDays: Int = 545, tolerance: Double = 0.15): Map<Double, Pair<Double, String>> {
+        val last = lastActivityDate() ?: return emptyMap()
+        val lastDate = runCatching { LocalDate.parse(last.take(10)) }.getOrNull() ?: return emptyMap()
+        val since = lastDate.minusDays(sinceDays.toLong())
+        val pano = panoFromDb()
+        val minHrFrac = 0.82 // отсев лёгких пробежек, похожих по дистанции на табличную, но не близких к усилию гонки
+
+        val best = mutableMapOf<Double, Pair<Double, String>>() // anchor -> (vdot, date)
+        readableDatabase.rawQuery(
+            """SELECT date, distance_m, duration_s, avg_hr FROM activities
+               WHERE date >= ? AND distance_m IS NOT NULL AND duration_s IS NOT NULL
+                     AND distance_m >= 700 AND duration_s >= 150""",
+            arrayOf(since.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                val date = c.getString(0)
+                val distM = c.getDouble(1)
+                val durS = c.getDouble(2)
+                val avgHr = if (c.isNull(3)) null else c.getInt(3)
+                val anchor = VdotMath.ANCHOR_DISTANCES_M.firstOrNull { a ->
+                    distM >= a * (1 - tolerance) && distM <= a * (1 + tolerance)
+                } ?: continue
+                if (pano != null && avgHr != null && avgHr < pano * minHrFrac) continue
+                val vd = VdotMath.vdot(distM, durS)
+                if (vd <= 0 || vd.isNaN() || vd.isInfinite()) continue
+                val prev = best[anchor]
+                if (prev == null || vd > prev.first) best[anchor] = vd to date
+            }
+        }
+        return best
+    }
+
     fun intervalsForActivity(activityId: Long): List<IntervalRow> {
         val rows = mutableListOf<IntervalRow>()
         readableDatabase.rawQuery(

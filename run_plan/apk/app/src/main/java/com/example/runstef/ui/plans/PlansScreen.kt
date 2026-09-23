@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -54,6 +55,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.zIndex
 import com.example.runstef.data.PlanHtmlParser
 import com.example.runstef.data.PlanRepository
@@ -76,6 +78,7 @@ fun PlansScreen(
     val context = LocalContext.current
     val repo = remember { PlanRepository(context) }
     var plans by remember { mutableStateOf<List<SavedPlan>>(emptyList()) }
+    var defaultPlanFile by remember { mutableStateOf<String?>(null) }
     var pendingDelete by remember { mutableStateOf<SavedPlan?>(null) }
     var pendingRename by remember { mutableStateOf<SavedPlan?>(null) }
     var fabMenuExpanded by remember { mutableStateOf(false) }
@@ -84,7 +87,10 @@ fun PlansScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) { plans = withContext(Dispatchers.IO) { repo.listPlans() } }
+    LaunchedEffect(Unit) {
+        plans = withContext(Dispatchers.IO) { repo.listPlans() }
+        defaultPlanFile = withContext(Dispatchers.IO) { repo.getDefaultPlan()?.fileName }
+    }
 
     // «Из файла» — импорт ранее скачанного HTML-плана через системный файловый менеджер.
     val importLauncher = rememberLauncherForActivityResult(
@@ -203,8 +209,14 @@ fun PlansScreen(
                         ) {
                             PlanCard(
                                 saved = saved,
+                                isDefault = saved.fileName == defaultPlanFile,
+                                canChooseDefault = plans.size > 1,
                                 onView = { onViewPlan(saved.filePath) },
                                 onRename = { pendingRename = saved },
+                                onMakeDefault = {
+                                    repo.setDefaultPlan(saved.fileName)
+                                    defaultPlanFile = saved.fileName
+                                },
                                 onSend = {
                                     val uri = repo.getShareUri(saved.filePath)
                                     val intent = Intent(Intent.ACTION_SEND).apply {
@@ -350,8 +362,11 @@ fun PlansScreen(
 @Composable
 private fun PlanCard(
     saved: SavedPlan,
+    isDefault: Boolean,
+    canChooseDefault: Boolean,
     onView: () -> Unit,
     onRename: () -> Unit,
+    onMakeDefault: () -> Unit,
     onSend: () -> Unit,
     onExport: () -> Unit,
     onDelete: () -> Unit
@@ -360,7 +375,13 @@ private fun PlanCard(
     var menuExpanded by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).clickable(onClick = onView),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        // Основной план («Мои планы» → ⋮ → «Сделать основным», см. PlanRepository.setDefaultPlan())
+        // подсвечивается рамкой в цвет темы — из него берётся «тренировка на сегодня» для
+        // автозаполнения питания в калькуляторе геля (см. ToolUrlBuilder.buildGel()).
+        border = if (isDefault) {
+            androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+        } else null
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -369,7 +390,19 @@ private fun PlanCard(
                 verticalAlignment = Alignment.Top
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = saved.plan.meta.name, style = MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment = Alignment.Top) {
+                        // Звёздочка — перед названием (не после), чтобы не потеряться в
+                        // переносе строки у длинных названий планов (см. Мои планы).
+                        if (isDefault) {
+                            Icon(
+                                Icons.Filled.Star,
+                                contentDescription = "Основной план",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 3.dp, end = 6.dp).size(18.dp)
+                            )
+                        }
+                        Text(text = saved.plan.meta.name, style = MaterialTheme.typography.titleMedium)
+                    }
                     saved.plan.meta.marathon?.let {
                         Text(
                             text = "Цель: $it",
@@ -393,6 +426,13 @@ private fun PlanCard(
                             leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
                             onClick = { menuExpanded = false; onRename() }
                         )
+                        if (canChooseDefault && !isDefault) {
+                            DropdownMenuItem(
+                                text = { Text("Сделать основным") },
+                                leadingIcon = { Icon(Icons.Filled.Star, contentDescription = null) },
+                                onClick = { menuExpanded = false; onMakeDefault() }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Отправить") },
                             leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },

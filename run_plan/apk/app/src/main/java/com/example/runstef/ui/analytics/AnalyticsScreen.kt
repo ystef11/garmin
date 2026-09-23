@@ -87,6 +87,10 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
 
     var savedAccounts by remember { mutableStateOf(vm.savedGarminAccounts()) }
     var account by rememberSaveable { mutableStateOf("") }
+    // Основной аккаунт — из его локальной базы аналитики калькуляторы берут данные автоподстановки
+    // (см. ToolUrlBuilder.kt). Отдельно от [account] выше: [account] — какой аккаунт СЕЙЧАС открыт/
+    // импортируется на этой вкладке, основной может быть другим (или тем же, если он один).
+    var primaryAccount by remember { mutableStateOf(vm.primaryGarminAccount()) }
 
     var startDate by rememberSaveable { mutableStateOf("") }
     // Стало true, как только пользователь САМ поменял поле «С» руками (см. DateField ниже).
@@ -111,8 +115,12 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
     val cancelRequested by vm.cancelRequested.collectAsState()
 
     LaunchedEffect(Unit) {
-        val last = vm.lastUsedAccount()
-        account = last.ifBlank { savedAccounts.firstOrNull() ?: "" }
+        // По умолчанию при открытии вкладки в поле подставляется ОСНОВНОЙ аккаунт (см.
+        // GarminTokenStore.primaryAccount()), а не последний использованный на вкладке «Экспорт»
+        // (vm.lastUsedAccount() — отдельное, не связанное с этим понятие). primaryAccount уже
+        // инициализирован синхронно при composition (см. remember выше), поэтому здесь просто
+        // берём его as-is — с тем же fallback на первый сохранённый, что и в самом primaryAccount().
+        account = primaryAccount.ifBlank { savedAccounts.firstOrNull() ?: "" }
     }
     LaunchedEffect(account) {
         if (account.isNotBlank()) {
@@ -154,6 +162,28 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
                 onAccountAdded = { newAccount ->
                     if (newAccount !in savedAccounts) savedAccounts = savedAccounts + newAccount
                     account = newAccount
+                    primaryAccount = vm.primaryGarminAccount()
+                },
+                showManagement = true,
+                primaryAccount = primaryAccount,
+                onPrimaryAccountChanged = { acc ->
+                    vm.setPrimaryGarminAccount(acc)
+                    primaryAccount = acc
+                },
+                onAccountDeleted = { acc ->
+                    vm.deleteGarminAccount(acc)
+                    savedAccounts = savedAccounts - acc
+                    if (account == acc) account = savedAccounts.firstOrNull() ?: ""
+                    primaryAccount = vm.primaryGarminAccount()
+                },
+                // При выходе из модалки управления аккаунтами поле выбора снова подставляет
+                // ОСНОВНОЙ аккаунт по умолчанию (тот же принцип, что и при открытии вкладки, см.
+                // LaunchedEffect(Unit) выше) — даже если пока модалка была открыта, пользователь
+                // успел выбрать в самом поле что-то другое.
+                onManagementDialogClosed = {
+                    val primary = vm.primaryGarminAccount()
+                    primaryAccount = primary
+                    if (primary.isNotBlank()) account = primary
                 }
             )
 

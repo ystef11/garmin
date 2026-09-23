@@ -1,6 +1,7 @@
 package com.example.runstef.network.garmin
 
 import android.content.Context
+import android.content.SharedPreferences
 import com.example.runstef.security.CryptoManager
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -52,5 +53,36 @@ class GarminTokenStore(private val context: Context) {
 
     fun clear(account: String) {
         CryptoManager.deleteFile(File(accountDir(account), "tokens.json"))
+    }
+
+    // Обычные (не зашифрованные) SharedPreferences — как и plan_order в PlanRepository, здесь
+    // хранится не секрет, а только имя того из уже сохранённых аккаунтов, который считается
+    // "основным". Токены самого аккаунта по-прежнему шифруются отдельно (см. save/load выше).
+    private fun accountsPrefs(): SharedPreferences =
+        context.getSharedPreferences("garmin_accounts", Context.MODE_PRIVATE)
+
+    private val keyPrimaryAccount = "primary_account"
+
+    /**
+     * Основной аккаунт Garmin — именно из его локальной базы аналитики (AnalyticsDb) подставляются
+     * данные в калькуляторы (pano/hrmax/curvol/res, см. ui/home/ToolUrlBuilder.kt), а также
+     * подсвечивается в модалке управления аккаунтами (см. ui/common/AccountManagementDialog.kt).
+     *
+     * Тот же принцип, что и у "основного плана" (см. PlanRepository.getDefaultPlan()): явный выбор
+     * пользователя, а если его нет (ещё не выбирали, либо выбранный аккаунт с тех пор удалён) —
+     * единственный сохранённый аккаунт становится основным автоматически; при нескольких без
+     * явного выбора берётся первый по алфавиту (savedAccounts() уже отсортирован) — детерминированно,
+     * а не произвольно. Возвращает "" только если сохранённых аккаунтов вообще нет.
+     */
+    fun primaryAccount(): String {
+        val saved = savedAccounts()
+        if (saved.isEmpty()) return ""
+        val stored = accountsPrefs().getString(keyPrimaryAccount, null)?.trim()?.lowercase()
+        if (stored != null && saved.contains(stored)) return stored
+        return saved.first()
+    }
+
+    fun setPrimaryAccount(account: String) {
+        accountsPrefs().edit().putString(keyPrimaryAccount, account.trim().lowercase()).apply()
     }
 }

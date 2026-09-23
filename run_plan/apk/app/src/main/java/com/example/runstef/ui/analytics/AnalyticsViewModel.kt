@@ -61,6 +61,20 @@ class AnalyticsViewModel(application: Application) : AndroidViewModel(applicatio
 
     suspend fun lastUsedAccount(): String = settings.getLastGarminAccount()
 
+    /** Основной аккаунт (для подсветки в AccountManagementDialog и подстановки данных в
+     * калькуляторы, см. GarminTokenStore.primaryAccount()/ui/home/ToolUrlBuilder.kt). */
+    fun primaryGarminAccount(): String = tokenStore.primaryAccount()
+
+    fun setPrimaryGarminAccount(account: String) {
+        tokenStore.setPrimaryAccount(account)
+    }
+
+    /** Удаляет сохранённый токен аккаунта (см. AccountManagementDialog — действие "Удалить").
+     * Локальная база аналитики этого аккаунта на устройстве не трогается. */
+    fun deleteGarminAccount(account: String) {
+        tokenStore.clear(account)
+    }
+
     /** Обновляет и дату последней тренировки, и статистику по базе (диапазон дат/количество) —
      * вызывается после каждого импорта и при выборе/открытии аккаунта (см. AnalyticsScreen). */
     fun refreshLastActivityDate(account: String) {

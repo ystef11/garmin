@@ -17,6 +17,21 @@ import kotlinx.serialization.builtins.serializer
  */
 object PlanHtmlParser {
 
+    // Питание/гели на тренировку НЕ хранятся как отдельное структурированное поле в plan.json
+    // (см. PlanModels.kt — у PlanWorkout нет поля fuel), только как автосгенерированный текст
+    // в note, например "Питание ~85 г/ч · всего ~340 г ≈ 9 гел." (см. run_plan_calculator.html,
+    // fuelForWorkout()/updateNotePreview()). Разбираем это же число обратно из note — используется
+    // для автозаполнения калькулятора геля (см. ToolUrlBuilder.buildGel() и applyPrefill() в
+    // run/gel_calculator.html). Если формат заметки в HTML-генераторе когда-нибудь изменится,
+    // поправьте и этот регэксп.
+    private val FUEL_NOTE_RE = Regex("Питание\\s*~?\\d+\\s*г/ч\\s*[·:]?\\s*всего\\s*~?(\\d+)\\s*г")
+
+    /** Суммарные углеводы (г) на тренировку по фразе "Питание ... · всего ~N г ..." из note, если она есть. */
+    fun fuelTotalGramsFromNote(note: String?): Int? {
+        if (note.isNullOrBlank()) return null
+        return FUEL_NOTE_RE.find(note)?.groupValues?.get(1)?.toIntOrNull()
+    }
+
     // Совпадает "window.__PLAN__=JSON.parse(" ИЛИ "const PLAN_XXX=JSON.parse(" + строковый литерал
     // в кавычках + ");". Группа 1 — префикс объявления (сохраняется как есть при пересборке, чтобы
     // не поломать остальной JS страницы, который может ссылаться на старое имя переменной),

@@ -40,9 +40,10 @@ fun HomeScreen(state: HomeUiState, onOpenTool: (CalculatorTool) -> Unit) {
                     text = state.subtitle,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 16.dp)
+                    modifier = Modifier.padding(bottom = 12.dp)
                 )
             }
+            ProfileSummaryCard()
         }
         items(state.tools) { tool ->
             ToolCard(tool = tool, onClick = { onOpenTool(tool) })

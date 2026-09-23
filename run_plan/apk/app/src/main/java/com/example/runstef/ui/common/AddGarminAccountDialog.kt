@@ -39,12 +39,20 @@ import kotlinx.coroutines.withContext
  * успеха достаточно обновить список сохранённых аккаунтов и выбрать [onAccountAdded].
  */
 @Composable
-fun AddGarminAccountDialog(onDismiss: () -> Unit, onAccountAdded: (String) -> Unit) {
+fun AddGarminAccountDialog(
+    onDismiss: () -> Unit,
+    onAccountAdded: (String) -> Unit,
+    // Заполнен, когда окно открыто из AccountManagementDialog действием "Изменить пароль" для
+    // уже сохранённого аккаунта — тогда e-mail фиксирован (только повторный вход тем же логином
+    // с новым паролем перезапишет токен, см. submit()/tokenStore.save() ниже), а не добавление
+    // нового аккаунта. При обычном добавлении (кнопка "＋"/"+ Добавить аккаунт") остаётся null.
+    lockedEmail: String? = null
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val tokenStore = remember { GarminTokenStore(context) }
 
-    var email by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf(lockedEmail ?: "") }
     var password by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -82,12 +90,12 @@ fun AddGarminAccountDialog(onDismiss: () -> Unit, onAccountAdded: (String) -> Un
 
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text("Добавить аккаунт Garmin") },
+        title = { Text(if (lockedEmail != null) "Изменить пароль" else "Добавить аккаунт Garmin") },
         text = {
             Column {
                 OutlinedTextField(
                     value = email, onValueChange = { email = it },
-                    label = { Text("E-mail") }, enabled = !busy,
+                    label = { Text("E-mail") }, enabled = !busy && lockedEmail == null,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Email),
                     modifier = Modifier.fillMaxWidth()
                 )
