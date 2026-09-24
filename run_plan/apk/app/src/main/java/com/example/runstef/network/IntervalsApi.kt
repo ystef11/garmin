@@ -164,6 +164,22 @@ class IntervalsApi(
 
     data class Result(val ok: Int = 0, val cleared: Int = 0, val dryRun: Boolean = false, val count: Int = 0)
 
+    // ИСПРАВЛЕНО (ревью п.14 "intervals.icu: пустой/дублирующийся тег удаляет чужие события"):
+    // раньше matching-предикат при чистке был name.startsWith(tag) БЕЗ требования непустого
+    // tag и без разделителя-пробела - при пустом tag ("".startsWith("") == true для ЛЮБОГО
+    // name) это удаляло АБСОЛЮТНО ВСЕ события атлета в диапазоне дат плана (в т.ч. созданные
+    // вручную/другими планами), а при непустом, но являющемся префиксом чужого названия
+    // (например tag="M" совпадает с "Marathon pace test", созданным не этим планом) - чужие
+    // события той же буквы. Плюс вся чистка шла ОДНИМ проходом ДО создания новых событий:
+    // сеть/квота падает на середине создания - старые события уже удалены, новых нет.
+    // Теперь: 1) require(tag.isNotBlank()) - без тега импорт не выполняется вообще; 2) сравнение
+    // с обязательным разделителем "$tag " (как в GarminApi.upload, см. её же правку по этому
+    // ревью) - совпадает только с событиями, которые ЭТОТ план мог создать (workoutName/name
+    // строится из w.name, который уже начинается с "$tag ", см. calculator); 3) загрузка
+    // по дням, как в GarminApi: для каждой даты сперва создаём новые события, и только после
+    // успеха удаляем старые события этого тега на этой дате (кроме только что созданных) -
+    // отказ сети на одной дате не трогает уже безопасно перезалитые даты и не стирает то, что
+    // ещё не заменено новым.
     fun upload(
         plan: RunPlan,
         skipCross: Set<String>,
@@ -173,6 +189,8 @@ class IntervalsApi(
         isCancelled: () -> Boolean = { false }
     ): Result {
         val tag = plan.meta.tag
+        require(tag.isNotBlank()) { "У плана не задан тег — загрузка отменена (иначе пришлось бы стирать все события в календаре intervals.icu)." }
+        val tagPrefix = "$tag "
         val events = plan.workouts.mapNotNull { eventFor(it, skipCross) }.sortedBy { it.startDateLocal }
         if (events.isEmpty()) throw RuntimeException("В плане нет тренировок для импорта.")
         val d0 = events.first().startDateLocal.substring(0, 10)
@@ -192,30 +210,60 @@ class IntervalsApi(
         }
 
         val evUrl = "$BASE/athlete/$athleteId/events"
-        // Перед загрузкой всегда чистим ранее загруженные события этого плана в
-        // затрагиваемом диапазоне дат — защита от дублей при повторном запуске/перезаливке.
-        var cleared = 0
+
+        data class OldEvent(val id: String, val date: String)
+
         val listJson = request("GET", "$evUrl?oldest=$d0&newest=$d1&category=WORKOUT")
         val arr = runCatching { Json.parseToJsonElement(listJson).jsonArray }.getOrNull()
+        val oldByDate = mutableMapOf<String, MutableList<OldEvent>>()
         arr?.forEach { el ->
-            if (isCancelled()) throw ImportCancelledException()
             val obj = el.jsonObject
             val name = obj["name"]?.jsonPrimitive?.content ?: ""
-            if (name.startsWith(tag)) {
-                val id = obj["id"]?.jsonPrimitive?.content ?: obj["id"].toString()
-                request("DELETE", "$evUrl/$id")
-                cleared++
+            if (!name.startsWith(tagPrefix)) return@forEach
+            val id = obj["id"]?.jsonPrimitive?.content ?: obj["id"].toString()
+            val startLocal = obj["start_date_local"]?.jsonPrimitive?.content ?: return@forEach
+            val date = startLocal.substring(0, minOf(10, startLocal.length))
+            oldByDate.getOrPut(date) { mutableListOf() }.add(OldEvent(id, date))
+        }
+
+        val eventsByDate = events.groupBy { it.startDateLocal.substring(0, 10) }
+        var ok = 0
+        var cleared = 0
+        for ((date, dayEvents) in eventsByDate) {
+            if (isCancelled()) throw ImportCancelledException()
+            for (e in dayEvents) {
+                request("POST", evUrl, e.toJson())
+                ok++
+            }
+            // Оба (все) новых события на эту дату созданы — теперь безопасно почистить старые
+            // события ЭТОГО тега на эту же дату.
+            oldByDate[date]?.forEach { old ->
+                try {
+                    request("DELETE", "$evUrl/${old.id}")
+                    cleared++
+                } catch (ex: Exception) {
+                    log("  FAIL удаления старого события $date id=${old.id} -> ${ex.message}")
+                }
+            }
+            if (ok % 10 < dayEvents.size) log("  создано $ok/${events.size}…")
+        }
+
+        // Даты, которые были в старой версии плана (в пределах диапазона d0..d1), но которых
+        // больше нет в новой — план сократился/сдвинулся, эти старые события тоже надо убрать.
+        for ((date, olds) in oldByDate) {
+            if (date in eventsByDate) continue
+            if (isCancelled()) throw ImportCancelledException()
+            olds.forEach { old ->
+                try {
+                    request("DELETE", "$evUrl/${old.id}")
+                    cleared++
+                } catch (ex: Exception) {
+                    log("  FAIL удаления устаревшего события $date id=${old.id} -> ${ex.message}")
+                }
             }
         }
-        if (cleared > 0) log("Удалено ранее загруженных событий этого плана: $cleared")
 
-        var ok = 0
-        for (e in events) {
-            if (isCancelled()) throw ImportCancelledException()
-            request("POST", evUrl, e.toJson())
-            ok++
-            if (ok % 10 == 0) log("  создано $ok/${events.size}…")
-        }
+        if (cleared > 0) log("Удалено старых событий этого плана: $cleared")
         log("Готово: создано $ok запланированных тренировок в intervals.icu ($d0 … $d1).")
         return Result(ok = ok, cleared = cleared)
     }

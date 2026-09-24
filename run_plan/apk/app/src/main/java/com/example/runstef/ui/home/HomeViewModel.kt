@@ -99,7 +99,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         return try {
             val config = refreshConfig()
             val update = config.update
-            if (update != null && VersionCompare.isNewer(update.latestVersion, config.ownVersion)) update else null
+            if (update != null && config.updateAvailable) update else null
         } catch (e: Exception) {
             null
         }

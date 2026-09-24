@@ -2902,7 +2902,14 @@ def main(db_path, out_path, json_path=None):
         f'({min_hr_note}, плато, не интервальная структура) — типичный диапазон 10К-гонок и жёстких '
         'темповых тестов. Порог отступа считается от ПАНО (см. ниже), а не хардкодится.</p>'
     )
-    html.append('<div class="table-wrap">' + tables["3"].to_html(index=False, escape=False) + '</div>')
+    # ИСПРАВЛЕНО (ревью п.12 "HTML-инъекция в отчёте аналитики"): таблицы 3/6b/7/4a/
+    # 4a_excluded ниже рендерятся через to_html() и включают колонку "Название" с сырым
+    # текстом названия активности из Garmin (пользователь может назвать пробежку как угодно,
+    # включая теги/скрипты) — раньше escape=False вставлял этот текст в HTML отчёта БЕЗ
+    # экранирования, т.е. произвольный HTML/JS из названия активности выполнялся прямо в
+    # WebView при просмотре отчёта. Теперь везде escape=True (стандартное поведение pandas) —
+    # все текстовые ячейки (включая "Название") экранируются перед вставкой в HTML.
+    html.append('<div class="table-wrap">' + tables["3"].to_html(index=False, escape=True) + '</div>')
     html.append("</div>")
 
     # Раздел 2 (оптимальный пульс лёгкого бега, было 7) — общий заголовок, 2а/2б — два независимых метода
@@ -2951,7 +2958,7 @@ def main(db_path, out_path, json_path=None):
             'для построения зон (см. раздел 3) — только как один из двух независимых аргументов в '
             'пользу того, где проходит граница Z1/Z2 (см. докстринг build_zones).</p>'
         )
-        html.append('<div class="table-wrap">' + tables["6b"].to_html(index=False, escape=False) + '</div>')
+        html.append('<div class="table-wrap">' + tables["6b"].to_html(index=False, escape=True) + '</div>')
         html.append("</div>")
 
     # Раздел 3 (пульсовые зоны и темп по ним, последние недели, было 8)
@@ -2963,7 +2970,7 @@ def main(db_path, out_path, json_path=None):
         f'из раздела 2 составляет {easy_center} уд/мин — '
         f'{"внутри" if z2_lo <= easy_center <= z2_hi else "вне"} границ Z2.'
     )
-    html.append('<div class="table-wrap">' + tables["7"].to_html(index=False, escape=False) + '</div>')
+    html.append('<div class="table-wrap">' + tables["7"].to_html(index=False, escape=True) + '</div>')
     html.append(
         f'<p class="meta">Z1/Z2/Z3 построены по методике Карвонена (%HRR = резерв пульса = max_hr '
         f'{"−"} rhr): Z2 = 60-70% HRR при rhr={rhr:.0f} уд/мин ({rhr_info["source"]}, '
@@ -2996,7 +3003,7 @@ def main(db_path, out_path, json_path=None):
     )
     if len(tables["4a"]):
         html.append("<h3>Гонки, использованные для VDOT</h3>")
-        html.append('<div class="table-wrap">' + tables["4a"].to_html(index=False, escape=False) + '</div>')
+        html.append('<div class="table-wrap">' + tables["4a"].to_html(index=False, escape=True) + '</div>')
         html.append(
             '<p class="meta">"Срыв темпа" — автоматически обнаруженный участок, где темп резко проседает '
             "БЕЗ соответствующего роста пульса (пульс не растёт или даже падает вместе с замедлением) — "
@@ -3026,7 +3033,7 @@ def main(db_path, out_path, json_path=None):
             '<div class="note">Исключены из VDOT (пульс ниже ожидаемого для эффорта в полную силу '
             'на такой дистанции):</div>'
         )
-        html.append('<div class="table-wrap">' + tables["4a_excluded"].to_html(index=False, escape=False) + '</div>')
+        html.append('<div class="table-wrap">' + tables["4a_excluded"].to_html(index=False, escape=True) + '</div>')
     html.append("</div>")
 
     # Раздел 5 (VO2max-прокси, было 3b)

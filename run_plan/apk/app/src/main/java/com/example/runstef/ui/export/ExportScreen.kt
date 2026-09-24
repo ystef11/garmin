@@ -84,6 +84,7 @@ fun ExportScreen(preselectedFilePath: String? = null) {
     val logLines by vm.log.collectAsState()
     val isRunning by vm.isRunning.collectAsState()
     val cancelRequested by vm.cancelRequested.collectAsState()
+    val busyOther by vm.busyOther.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Экспорт плана", style = MaterialTheme.typography.headlineSmall)
@@ -111,16 +112,24 @@ fun ExportScreen(preselectedFilePath: String? = null) {
                 Tab(selected = tabIndex == 1, onClick = { tabIndex = 1 }, text = { Text("intervals.icu") })
             }
 
-            val plan = selectedPlan?.plan
+            val planFilePath = selectedPlan?.filePath
+            if (busyOther) {
+                Text(
+                    "Идёт загрузка аналитики — экспорт станет доступен после её окончания.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
             if (tabIndex == 0) {
                 GarminTab(
                     initialAccounts = vm.savedGarminAccounts(),
-                    enabled = !isRunning && plan != null,
+                    enabled = !isRunning && !busyOther && planFilePath != null,
                     isRunning = isRunning,
                     cancelRequested = cancelRequested,
                     onCancel = { vm.cancelExport() },
                     onSubmit = { account, allDates, fromDate ->
-                        plan?.let {
+                        planFilePath?.let {
                             vm.exportToGarmin(it, account, skipCross.value, dryRun, testFirstWeek, allDates, fromDate)
                         }
                     }
@@ -128,12 +137,12 @@ fun ExportScreen(preselectedFilePath: String? = null) {
             } else {
                 IntervalsTab(
                     vm = vm,
-                    enabled = !isRunning && plan != null,
+                    enabled = !isRunning && !busyOther && planFilePath != null,
                     isRunning = isRunning,
                     cancelRequested = cancelRequested,
                     onCancel = { vm.cancelExport() },
                     onSubmit = { apiKey, athlete ->
-                        plan?.let { vm.exportToIntervals(it, apiKey, athlete, skipCross.value, dryRun) }
+                        planFilePath?.let { vm.exportToIntervals(it, apiKey, athlete, skipCross.value, dryRun) }
                     }
                 )
             }

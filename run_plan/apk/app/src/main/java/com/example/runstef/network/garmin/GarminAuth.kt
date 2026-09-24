@@ -1,5 +1,6 @@
 package com.example.runstef.network.garmin
 
+import android.content.Context
 import kotlinx.serialization.json.Json
 import com.example.runstef.network.NetworkModule
 import kotlinx.serialization.json.jsonObject
@@ -22,6 +23,13 @@ import java.util.concurrent.TimeUnit
  * разметку страницы входа, потребуется поправить регэкспы ниже.
  */
 class GarminAuth(
+    // ИСПРАВЛЕНО (ревью п.16, таблица "garth OAuth key caching"): context нужен только для
+    // локального (не зашифрованного - ключ не секрет пользователя, это публичный consumer key/
+    // secret самого приложения-клиента, который публикует сообщество garth) кэша
+    // OAuth1-консьюмера (см. fetchConsumerCreds ниже) - без него кэш просто не работает и
+    // каждый вызов идёт в сеть, как раньше (обратная совместимость для мест, где Context
+    // недоступен/не нужен).
+    private val context: Context? = null,
     private val log: (String) -> Unit = {}
 ) {
     companion object {
@@ -45,16 +53,47 @@ class GarminAuth(
 
     data class ConsumerCreds(val key: String, val secret: String)
 
+    private fun cachePrefs() = context?.getSharedPreferences("garmin_oauth1_consumer", Context.MODE_PRIVATE)
+
+    private fun loadCachedConsumerCreds(): ConsumerCreds? {
+        val p = cachePrefs() ?: return null
+        val key = p.getString("key", null) ?: return null
+        val secret = p.getString("secret", null) ?: return null
+        return ConsumerCreds(key, secret)
+    }
+
+    private fun saveCachedConsumerCreds(creds: ConsumerCreds) {
+        cachePrefs()?.edit()?.putString("key", creds.key)?.putString("secret", creds.secret)?.apply()
+    }
+
+    // ИСПРАВЛЕНО (ревью п.16, таблица "garth OAuth key caching + isSuccessful check"): раньше
+    // consumer_key/consumer_secret запрашивались с thegarth.s3.amazonaws.com (сторонний хостинг
+    // сообщества garth, не сам Garmin) БЕЗУСЛОВНО на КАЖДЫЙ логин/рефреш - лишний сетевой
+    // запрос на каждую операцию, да ещё и добавляющий зависимость от доступности стороннего
+    // S3-бакета (недоступен на секунду - весь логин падает, хотя сам ключ меняется очень редко).
+    // Плюс отсутствовала проверка resp.isSuccessful (была только в местах ниже по цепочке -
+    // OAuth1/OAuth2 обмен) - при HTTP-ошибке (403/5xx) resp.body?.string() всё равно не null
+    // (это тело страницы ошибки), и код падал с невнятным "consumer_key не найден в ответе"
+    // вместо понятного "HTTP <код>". Теперь: 1) есть isSuccessful-проверка с кодом в сообщении
+    // об ошибке; 2) успешно полученные ключи кэшируются локально (нужен context != null - см.
+    // его докстринг у конструктора), последующие вызовы этого процесса берут их из кэша без
+    // сети.
     private fun fetchConsumerCreds(): ConsumerCreds {
+        loadCachedConsumerCreds()?.let { return it }
         val req = Request.Builder().url(CONSUMER_JSON_URL).header("User-Agent", UA).build()
-        client.newCall(req).execute().use { resp ->
-            val text = resp.body?.string() ?: throw RuntimeException("Не удалось получить OAuth1-ключи Garmin")
+        val fresh = client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                throw RuntimeException("Не удалось получить OAuth1-ключи Garmin: HTTP ${resp.code}")
+            }
+            val text = resp.body?.string() ?: throw RuntimeException("Не удалось получить OAuth1-ключи Garmin: пустой ответ")
             val key = Regex("\"consumer_key\"\\s*:\\s*\"(.*?)\"").find(text)?.groupValues?.get(1)
                 ?: throw RuntimeException("consumer_key не найден в ответе")
             val secret = Regex("\"consumer_secret\"\\s*:\\s*\"(.*?)\"").find(text)?.groupValues?.get(1)
                 ?: throw RuntimeException("consumer_secret не найден в ответе")
-            return ConsumerCreds(key, secret)
+            ConsumerCreds(key, secret)
         }
+        saveCachedConsumerCreds(fresh)
+        return fresh
     }
 
     private fun signinQuery(): String {
@@ -219,7 +258,7 @@ class GarminAuth(
         val text = resp.body?.string() ?: ""
         resp.close()
         if (!resp.isSuccessful) {
-            throw RuntimeException("Обмен OAuth1 -> OAuth2 не удался: ${resp.code} $text")
+            throw ExchangeHttpException(resp.code, "Обмен OAuth1 -> OAuth2 не удался: ${resp.code} $text")
         }
         val json = Json.parseToJsonElement(text).jsonObject
         val access = json["access_token"]?.jsonPrimitive?.content
@@ -238,14 +277,67 @@ class GarminAuth(
     /** Обновляет OAuth2 access_token, переобменивая сохранённый OAuth1-токен (тот не истекает так быстро). */
     fun refresh(tokens: GarminTokens): GarminTokens {
         val creds = fetchConsumerCreds()
-        return exchangeOAuth1ForOAuth2(creds, tokens.oauth1Token, tokens.oauth1TokenSecret)
+        val fresh = try {
+            exchangeOAuth1ForOAuth2(creds, tokens.oauth1Token, tokens.oauth1TokenSecret)
+        } catch (e: ExchangeHttpException) {
+            // 401 при обмене может означать, что garth сменил consumer key/secret, а у нас в кэше
+            // старые — сбрасываем кэш и пробуем ещё раз со свежими ключами.
+            if (e.code != 401) throw e
+            cachePrefs()?.edit()?.clear()?.apply()
+            exchangeOAuth1ForOAuth2(fetchConsumerCreds(), tokens.oauth1Token, tokens.oauth1TokenSecret)
+        }
+        latest = fresh
+        return fresh
     }
+
+    class ExchangeHttpException(val code: Int, message: String) : RuntimeException(message)
 
     fun isExpired(tokens: GarminTokens): Boolean =
         System.currentTimeMillis() / 1000 >= tokens.oauth2ExpiresAtEpochSec - 60
 
     /** Универсальный вызов connectapi.garmin.com с Bearer-токеном (аналог garth.connectapi). */
+    // Правка 2026-09-24 (ревью п.7 "Повторный импорт затирает хорошие данные пустыми
+    // значениями"): раньше вход в Garmin проверялся/обновлялся ТОЛЬКО в начале импорта
+    // (см. AnalyticsImportService.runImport) - если токен истекал ПОСРЕДИ долгого импорта,
+    // все последующие connectApi() просто получали 401 и это тихо превращалось в null/пустые
+    // поля выше по стеку. Необязательный колбэк - вызывающий код (у которого есть
+    // GarminTokenStore и имя аккаунта) может подключить сюда авто-обновление+сохранение
+    // токена; connectApi() тогда сам одним запросом повторит вызов с новым токеном при 401.
+    // Не подключён (null, как раньше при прямом создании GarminAuth без этой настройки) -
+    // поведение не меняется, ответ с кодом 401 просто возвращается как есть.
+    var onTokenExpired: ((GarminTokens) -> GarminTokens?)? = null
+
+    // Самые свежие токены этого аккаунта, полученные через refresh(). Вызывающий код (импорт,
+    // экспорт) получает tokens один раз в начале и передаёт один и тот же объект во все вызовы —
+    // без этого после истечения входа КАЖДЫЙ запрос получал бы 401 и заново обновлял токен.
+    @Volatile
+    private var latest: GarminTokens? = null
+    private val refreshLock = Any()
+
+    private fun effective(tokens: GarminTokens): GarminTokens {
+        val l = latest
+        return if (l != null && l.oauth1Token == tokens.oauth1Token &&
+            l.oauth2ExpiresAtEpochSec >= tokens.oauth2ExpiresAtEpochSec) l else tokens
+    }
+
     fun connectApi(tokens: GarminTokens, path: String, method: String = "GET", jsonBody: String? = null): Response {
+        val used = effective(tokens)
+        val resp = connectApiOnce(used, path, method, jsonBody)
+        if (resp.code != 401) return resp
+        val onExpired = onTokenExpired ?: return resp
+        val refreshed = synchronized(refreshLock) {
+            // Если пока мы ждали, другой поток уже обновил токен — берём его, второй раз не обновляем.
+            val cur = effective(tokens)
+            if (cur.oauth2AccessToken != used.oauth2AccessToken) cur
+            else try { onExpired(used)?.also { latest = it } } catch (e: Exception) { null }
+        }
+        // Обновить не удалось — возвращаем исходный (ещё открытый) ответ 401 как есть.
+        if (refreshed == null) return resp
+        resp.close()
+        return connectApiOnce(refreshed, path, method, jsonBody)
+    }
+
+    private fun connectApiOnce(tokens: GarminTokens, path: String, method: String, jsonBody: String?): Response {
         val url = "$CONNECT_API$path"
         val builder = Request.Builder().url(url)
             .header("Authorization", "Bearer ${tokens.oauth2AccessToken}")

@@ -5,6 +5,8 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import kotlinx.serialization.json.Json
 import com.example.runstef.network.NetworkModule
+import com.example.runstef.network.ReleaseChecker
+import com.example.runstef.network.ApkUpdater
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
@@ -136,7 +138,9 @@ class ConfigRepository(private val context: Context) {
         return loaded
     }
 
-    val ownVersion: String get() = bundled().version
+    // Своя версия — из сборки (app/build.gradle.kts, appVersionName), а не из app_config.json:
+    // одно место, которое нельзя «забыть поднять» отдельно от самой сборки.
+    val ownVersion: String get() = com.example.runstef.BuildConfig.VERSION_NAME
 
     fun getSkippedVersion(): String? = cachePrefs.getString(keySkippedVersion, null)
 
@@ -170,28 +174,72 @@ class ConfigRepository(private val context: Context) {
      */
     fun getEffectiveConfig(): EffectiveConfig {
         val bundled = bundled()
-        if (isOnline()) {
+        val online = isOnline()
+        var home: HomeConfig? = null
+        var legacyUpdate: UpdateInfo? = null
+        if (online) {
             try {
-                val response = client.newCall(Request.Builder().url(bundled.configUrl).build()).execute()
-                if (response.isSuccessful) {
-                    val text = response.body?.string()
-                    if (text != null) {
-                        // Валидируем перед сохранением в кэш — битый/недоступный ответ не должен
-                        // затирать последний рабочий кэш.
-                        val remote = configJson.decodeFromString(RemoteConfig.serializer(), text)
-                        cachePrefs.edit().putString(keyRemoteJson, text).apply()
-                        return EffectiveConfig(ownVersion = bundled.version, home = remote.home, update = remote.update)
+                client.newCall(Request.Builder().url(bundled.configUrl).build()).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val text = response.body?.string()
+                        if (text != null) {
+                            // Валидируем перед сохранением в кэш — битый ответ не должен затирать
+                            // последний рабочий кэш.
+                            val remote = configJson.decodeFromString(RemoteConfig.serializer(), text)
+                            cachePrefs.edit().putString(keyRemoteJson, text).apply()
+                            home = remote.home
+                            legacyUpdate = remote.update
+                        }
                     }
                 }
             } catch (e: Exception) {
                 // сеть есть, но запрос не удался или ответ битый — падаем на кэш/встроенный конфиг ниже
             }
         }
-
-        cachedRemote()?.let { cached ->
-            return EffectiveConfig(ownVersion = bundled.version, home = cached.home, update = cached.update)
+        if (home == null) {
+            cachedRemote()?.let { home = it.home; legacyUpdate = it.update }
         }
 
-        return EffectiveConfig(ownVersion = bundled.version, home = bundled.home, update = null)
+        // Обновление — из GitHub Releases (заполняется само при публикации релиза). Последний
+        // успешный ответ кэшируем, чтобы офлайн/при лимите API диалог работал по последним
+        // известным данным. Блок update из config.json — только запасной вариант.
+        val release = if (online) runCatching { ReleaseChecker.latest() }.getOrNull() else null
+        if (release != null) {
+            cachePrefs.edit().putString(keyRelease, configJson.encodeToString(UpdateInfo.serializer(), release)).apply()
+        }
+        val update = release ?: cachedRelease() ?: legacyUpdate
+
+        return EffectiveConfig(
+            ownVersion = ownVersion,
+            home = home ?: bundled.home,
+            update = update,
+            updateAvailable = update != null && isUpdateAvailable(update)
+        )
+    }
+
+    /**
+     * Обновление есть, только если номер версии релиза строго больше установленного —
+     * иначе, если установлена локальная сборка (например 0.0.6), а на GitHub всё ещё лежит
+     * более старый релиз (0.0.5), sha256 неизбежно отличается и раньше это ошибочно
+     * предлагалось как обновление. Сравнение по sha256 используется только как ДОПОЛНИТЕЛЬНАЯ
+     * проверка внутри той же версии (например, релиз пересобрали с тем же tag_name) — само по
+     * себе несовпадение хэша обновление не включает.
+     */
+    private fun isUpdateAvailable(update: UpdateInfo): Boolean {
+        if (VersionCompare.isNewer(update.latestVersion, ownVersion)) return true
+        if (VersionCompare.isNewer(ownVersion, update.latestVersion)) return false
+        val remote = update.sha256?.trim()
+        if (!remote.isNullOrEmpty()) {
+            val local = ApkUpdater.installedSha256(context)
+            if (local != null) return !remote.equals(local, ignoreCase = true)
+        }
+        return false
+    }
+
+    private val keyRelease = "latest_release_json"
+
+    private fun cachedRelease(): UpdateInfo? {
+        val text = cachePrefs.getString(keyRelease, null) ?: return null
+        return runCatching { configJson.decodeFromString(UpdateInfo.serializer(), text) }.getOrNull()
     }
 }

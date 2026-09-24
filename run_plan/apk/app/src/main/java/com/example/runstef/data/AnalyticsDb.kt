@@ -181,6 +181,131 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         fun openForImportCheck(context: Context, file: File): AnalyticsDb =
             AnalyticsDb(context, file)
 
+        // ИСПРАВЛЕНО (ревью п.16, таблица "DB import: валидация схемы через PRAGMA table_info"):
+        // раньше importDbFromUri (см. AnalyticsViewModel) считал схему импортируемого файла
+        // совместимой ПРОСТО по наличию таблицы activities, после чего принудительно
+        // выставлял raw.version = DB_VERSION - это подавляло SQLiteOpenHelper.onUpgrade() даже
+        // если у реального набора колонок таблицы не хватало (например, старый десктопный
+        // экспорт/старая версия схемы без каких-то из более новых колонок вроде
+        // avg_device_temperature_c). Единственная проверка после этого - check.lastActivityDate()
+        // - трогает лишь пару базовых колонок и не заметила бы такую нехватку; настоящая ошибка
+        // "no such column" вылезала бы куда позже, при сборке отчёта. Теперь колонки таблицы
+        // activities реально сверяются через PRAGMA table_info(activities) со списком колонок,
+        // которые ожидает актуальная схема (parseSchemaColumns(ACTIVITIES_SCHEMA)) - недостающие
+        // возвращаются вызывающему, который решает, форсировать ли version или дать сработать
+        // обычному onUpgrade/отказать импорту с понятной причиной.
+        private fun parseSchemaColumns(createTableSql: String): Set<String> {
+            val body = createTableSql.substringAfter("(").substringBeforeLast(")")
+            return body.split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && !it.startsWith("PRIMARY KEY", ignoreCase = true) && !it.startsWith("FOREIGN KEY", ignoreCase = true) && !it.startsWith("UNIQUE", ignoreCase = true) }
+                .mapNotNull { it.split(Regex("\\s+")).firstOrNull()?.trim() }
+                .filter { it.isNotEmpty() }
+                .toSet()
+        }
+
+        /** Колонки, которые реально ожидает актуальная схема таблицы activities (парсится из
+         * той же ACTIVITIES_SCHEMA, что использует onCreate - единый источник правды). */
+        fun expectedActivitiesColumns(): Set<String> = parseSchemaColumns(ACTIVITIES_SCHEMA)
+
+        /** Возвращает имена колонок, которых не хватает в activities импортируемого файла
+         * (пусто, если схема полностью совместима). raw должен быть уже открыт на файле. */
+        fun missingActivitiesColumns(raw: SQLiteDatabase): List<String> {
+            val actual = mutableSetOf<String>()
+            raw.rawQuery("PRAGMA table_info(activities)", null).use { c ->
+                val nameIdx = c.getColumnIndex("name")
+                while (c.moveToNext()) {
+                    if (nameIdx >= 0) actual.add(c.getString(nameIdx))
+                }
+            }
+            return expectedActivitiesColumns().filter { it !in actual }
+        }
+
+        private const val LACTATE_THRESHOLD_SCHEMA = """
+            CREATE TABLE lactate_threshold (
+                date TEXT PRIMARY KEY,
+                threshold_hr INTEGER,
+                threshold_pace_s_per_km REAL,
+                source TEXT,
+                exported_at TEXT
+            )
+        """
+
+        private const val CROSS_ACTIVITIES_SCHEMA = """
+            CREATE TABLE cross_activities (
+                activity_id INTEGER PRIMARY KEY,
+                date TEXT,
+                start_time TEXT,
+                name TEXT,
+                sport TEXT,
+                duration_s REAL,
+                distance_m REAL,
+                avg_hr INTEGER,
+                max_hr INTEGER,
+                exported_at TEXT
+            )
+        """
+
+        /** (имя колонки, определение для ALTER TABLE ADD COLUMN) из CREATE TABLE. */
+        private fun parseSchemaColumnDefs(createTableSql: String): List<Pair<String, String>> {
+            val body = createTableSql.substringAfter("(").substringBeforeLast(")")
+            return body.split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && !it.startsWith("PRIMARY KEY", true) && !it.startsWith("FOREIGN KEY", true) && !it.startsWith("UNIQUE", true) }
+                .map { def -> def.split(Regex("\\s+")).first() to def }
+        }
+
+        /**
+         * Приводит схему импортируемой базы к текущей (вызывать ДО открытия через
+         * SQLiteOpenHelper, на «сыром» SQLiteDatabase временного файла):
+         *  - отсутствующие таблицы создаются по актуальной схеме;
+         *  - недостающие колонки добавляются через ALTER TABLE ADD COLUMN (значения NULL);
+         *  - если не хватает ключевой колонки (PRIMARY KEY / NOT NULL) — база несовместима,
+         *    бросается исключение с понятным текстом, рабочая база не трогается.
+         * После этого вызывающий ставит user_version = DB_VERSION. Возвращает список изменений
+         * для лога.
+         */
+        fun repairImportedSchema(raw: SQLiteDatabase): List<String> {
+            val changes = mutableListOf<String>()
+            val tables = listOf(
+                "activities" to ACTIVITIES_SCHEMA,
+                "intervals" to INTERVALS_SCHEMA,
+                "wellness" to WELLNESS_SCHEMA,
+                "lactate_threshold" to LACTATE_THRESHOLD_SCHEMA,
+                "cross_activities" to CROSS_ACTIVITIES_SCHEMA
+            )
+            raw.beginTransaction()
+            try {
+                for ((table, schema) in tables) {
+                    val actual = mutableSetOf<String>()
+                    raw.rawQuery("PRAGMA table_info($table)", null).use { c ->
+                        val nameIdx = c.getColumnIndex("name")
+                        while (c.moveToNext()) if (nameIdx >= 0) actual.add(c.getString(nameIdx).lowercase())
+                    }
+                    if (actual.isEmpty()) {
+                        raw.execSQL(schema.trimIndent())
+                        changes += "создана таблица $table"
+                        continue
+                    }
+                    for ((col, def) in parseSchemaColumnDefs(schema)) {
+                        if (col.lowercase() in actual) continue
+                        if (def.contains("PRIMARY KEY", true) || def.contains("NOT NULL", true)) {
+                            throw IllegalStateException("в таблице $table нет обязательной колонки $col — это не база Runstef/десктопного экспортёра")
+                        }
+                        raw.execSQL("ALTER TABLE $table ADD COLUMN $def")
+                        changes += "$table.$col"
+                    }
+                }
+                raw.execSQL("CREATE INDEX IF NOT EXISTS idx_activities_date ON activities(date)")
+                raw.execSQL("CREATE INDEX IF NOT EXISTS idx_intervals_activity ON intervals(activity_id)")
+                raw.execSQL("CREATE INDEX IF NOT EXISTS idx_cross_activities_date ON cross_activities(date)")
+                raw.setTransactionSuccessful()
+            } finally {
+                raw.endTransaction()
+            }
+            return changes
+        }
+
         private const val ACTIVITIES_SCHEMA = """
             CREATE TABLE activities (
                 activity_id INTEGER PRIMARY KEY,
@@ -422,6 +547,63 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         }
     }
 
+    /**
+     * COALESCE-upsert по ключу [conflictColumn]: при конфликте столбец обновляется значением ИЗ
+     * ЭТОЙ записи только если оно НЕ NULL, иначе остаётся прежнее значение строки. Правка
+     * 2026-09-24 (ревью п.7 "Повторный импорт затирает хорошие данные пустыми значениями"):
+     * обычный insertWithOnConflict(CONFLICT_REPLACE) заменяет строку ЦЕЛИКОМ - если сетевой
+     * запрос за лапами/detail/GAP в ЭТОМ прогоне вернул ошибку (401 из-за истёкшего входа,
+     * 429 и т.п.) и confounds пришли null, уже сохранённые хорошие значения затирались бы NULL.
+     */
+    private fun upsertCoalesce(db: SQLiteDatabase, table: String, conflictColumn: String, cv: ContentValues) {
+        val cols = cv.keySet().toList()
+        val colsSql = cols.joinToString(",")
+        val placeholders = cols.joinToString(",") { "?" }
+        val updateSql = cols.filter { it != conflictColumn }
+            .joinToString(",") { c -> "$c=COALESCE(excluded.$c,$c)" }
+        val sql = "INSERT INTO $table ($colsSql) VALUES ($placeholders) " +
+            "ON CONFLICT($conflictColumn) DO UPDATE SET $updateSql"
+        val stmt = db.compileStatement(sql)
+        cols.forEachIndexed { i, c ->
+            val idx = i + 1
+            when (val v = cv.get(c)) {
+                null -> stmt.bindNull(idx)
+                is Long -> stmt.bindLong(idx, v)
+                is Int -> stmt.bindLong(idx, v.toLong())
+                is Short -> stmt.bindLong(idx, v.toLong())
+                is Double -> stmt.bindDouble(idx, v)
+                is Float -> stmt.bindDouble(idx, v.toDouble())
+                is Boolean -> stmt.bindLong(idx, if (v) 1L else 0L)
+                is ByteArray -> stmt.bindBlob(idx, v)
+                else -> stmt.bindString(idx, v.toString())
+            }
+        }
+        try {
+            stmt.executeInsert()
+        } finally {
+            stmt.close()
+        }
+    }
+
+    /**
+     * Тот же upsertActivity + replaceIntervals, что раньше вызывались двумя отдельными
+     * запросами подряд, но теперь в ОДНОЙ транзакции (см. ревью п.7, файлы: этот метод +
+     * место вызова в GarminActivitiesApi.importRange) - без этого при падении/убийстве
+     * процесса точно между двумя запросами строка активности и её лапы могли разойтись
+     * (например новые лапы уже удалены, а строка activities ещё не обновлена, или наоборот).
+     */
+    fun upsertActivityWithLaps(a: ActivityRow, laps: List<IntervalRow>, exportedAtIso: String) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            upsertActivity(a, exportedAtIso)
+            if (laps.isNotEmpty()) replaceIntervals(a.activityId, laps)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     fun upsertActivity(a: ActivityRow, exportedAtIso: String) {
         val cv = ContentValues().apply {
             put("activity_id", a.activityId)
@@ -465,7 +647,7 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
             a.avgDeviceTemperatureC?.let { put("avg_device_temperature_c", it) } ?: putNull("avg_device_temperature_c")
             put("exported_at", exportedAtIso)
         }
-        writableDatabase.insertWithOnConflict("activities", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+        upsertCoalesce(writableDatabase, "activities", "activity_id", cv)
     }
 
     fun upsertWellness(w: WellnessRow, exportedAtIso: String) {
@@ -721,7 +903,7 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
         var totalM = 0.0
         readableDatabase.rawQuery(
             """SELECT distance_m FROM activities
-               WHERE date >= ? AND distance_m IS NOT NULL AND (sport IS NULL OR sport = 'running')""",
+               WHERE date >= ? AND distance_m IS NOT NULL AND (sport IS NULL OR sport LIKE '%running%' OR sport IN ('virtual_run','obstacle_run','ultra_run'))""",
             arrayOf(since.toString())
         ).use { c ->
             while (c.moveToNext()) {
@@ -742,14 +924,39 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
      * если известно ПАНО) — то есть фактически лучший результат/прикидку на этой дистанции, а не
      * обязательно официальную гонку. Возвращает map(anchorDistM -> Pair(лучший VDOT, дата)).
      */
-    fun bestEffortsByAnchor(sinceDays: Int = 545, tolerance: Double = 0.15): Map<Double, Pair<Double, String>> {
+    private data class EffortEntry(val anchor: Double, val vdot: Double, val date: String)
+
+    /**
+     * Лучшие результаты по каждой опорной дистанции для калькулятора планов (ToolUrlBuilder ->
+     * res=dist:sec,dist:sec...). Правка 2026-09-24 (см. ревью п.3 "Калькулятор планов получает
+     * устаревшие результаты"): раньше для каждой дистанции независимо брался просто максимум
+     * VDOT за окно - если форма выросла с тех пор, старый (заниженный) результат НА ДИСТАНЦИИ
+     * ЦЕЛИ всё равно использовался напрямую, хотя более свежий забег на ДРУГОЙ дистанции
+     * показывал, что бегун уже быстрее. Теперь: 1) собираем все подходящие забеги с датой,
+     * 2) результат считается устаревшим и выбрасывается, если ПОЗЖЕ есть забег на любой
+     * дистанции с VDOT выше хотя бы на 1%, 3) из оставшихся берём лучший по каждой дистанции.
+     * Окно по умолчанию сужено до 180 дней; если за это время ничего подходящего нет,
+     * откатываемся на широкое (545 дней, как раньше) - иначе новичок без данных за последние
+     * полгода вообще не получит прогноза.
+     */
+    fun bestEffortsByAnchor(
+        sinceDays: Int = 180,
+        fallbackSinceDays: Int = 545,
+        tolerance: Double = 0.15
+    ): Map<Double, Pair<Double, String>> {
+        val narrow = bestEffortsByAnchorInWindow(sinceDays, tolerance)
+        if (narrow.isNotEmpty()) return narrow
+        return bestEffortsByAnchorInWindow(fallbackSinceDays, tolerance)
+    }
+
+    private fun bestEffortsByAnchorInWindow(sinceDays: Int, tolerance: Double): Map<Double, Pair<Double, String>> {
         val last = lastActivityDate() ?: return emptyMap()
         val lastDate = runCatching { LocalDate.parse(last.take(10)) }.getOrNull() ?: return emptyMap()
         val since = lastDate.minusDays(sinceDays.toLong())
         val pano = panoFromDb()
         val minHrFrac = 0.82 // отсев лёгких пробежек, похожих по дистанции на табличную, но не близких к усилию гонки
 
-        val best = mutableMapOf<Double, Pair<Double, String>>() // anchor -> (vdot, date)
+        val all = mutableListOf<EffortEntry>()
         readableDatabase.rawQuery(
             """SELECT date, distance_m, duration_s, avg_hr FROM activities
                WHERE date >= ? AND distance_m IS NOT NULL AND duration_s IS NOT NULL
@@ -767,11 +974,19 @@ class AnalyticsDb private constructor(context: Context, dbFile: File) :
                 if (pano != null && avgHr != null && avgHr < pano * minHrFrac) continue
                 val vd = VdotMath.vdot(distM, durS)
                 if (vd <= 0 || vd.isNaN() || vd.isInfinite()) continue
-                val prev = best[anchor]
-                if (prev == null || vd > prev.first) best[anchor] = vd to date
+                all.add(EffortEntry(anchor, vd, date))
             }
         }
-        return best
+        if (all.isEmpty()) return emptyMap()
+
+        // Устаревшие результаты выбрасываем целиком (а не просто занижаем ранг): если позже
+        // есть забег на ЛЮБОЙ дистанции с VDOT выше хотя бы на 1%, форма с тех пор явно
+        // выросла. Пример из ревью: старые 5 км за 22:00 (VDOT ~44.5) при том что позже
+        // пробежали 10 км за 40:00 (VDOT ~51.9, это примерно 19:20 на 5 км) - использовать
+        // 22:00 как прогноз для цели «5 км» больше не должны.
+        val fresh = all.filter { e -> all.none { f -> f.date > e.date && f.vdot > e.vdot * 1.01 } }
+
+        return fresh.groupBy { it.anchor }.mapValues { (_, l) -> l.maxBy { it.vdot }.let { it.vdot to it.date } }
     }
 
     fun intervalsForActivity(activityId: Long): List<IntervalRow> {

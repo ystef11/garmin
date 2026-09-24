@@ -1,6 +1,7 @@
 package com.example.runstef.security
 
 import android.content.Context
+import android.os.SystemClock
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.SecretKeyFactory
@@ -45,10 +46,29 @@ class AuthStore(context: Context) {
             .apply()
     }
 
+    // ИСПРАВЛЕНО (ревью п.16, таблица "PIN lockout должен использовать SystemClock.
+    // elapsedRealtime()"): раньше "until" считался и сравнивался через
+    // System.currentTimeMillis() — это ОБЫЧНЫЕ настенные часы устройства, которые пользователь
+    // (в т.ч. атакующий с физическим доступом) может просто перевести вперёд в «Дата и время»
+    // системных настроек, БЕЗ root — и блокировка по подбору ПИН обходится за несколько
+    // секунд. SystemClock.elapsedRealtime() — монотонное время с последней загрузки, на него
+    // изменение настенных часов не влияет. Обратная сторона: elapsedRealtime() сбрасывается в
+    // ~0 при перезагрузке устройства, из-за чего старое сохранённое "until" (посчитанное от
+    // аптайма ДО перезагрузки) после ребута может стать бессмысленно огромным относительно
+    // нового elapsedRealtime() и блокировка выглядела бы вечной — поэтому remain дополнительно
+    // клампится сверху по LOCKOUT_MAX_SECONDS: если "until" завышен настолько, что оставшееся
+    // время превышает максимально возможный по логике backoff интервал, сохранённое значение
+    // считается устаревшим (пережившим перезагрузку) и сбрасывается, а не трактуется как
+    // блокировка на неопределённый срок.
     /** Сколько секунд ещё действует блокировка после серии неверных ПИН — 0, если блокировки нет. */
     fun remainingLockoutSeconds(): Long {
         val until = prefs.getLong(KEY_LOCKED_UNTIL_MS, 0L)
-        val remain = (until - System.currentTimeMillis()) / 1000L
+        if (until == 0L) return 0L
+        val remain = (until - SystemClock.elapsedRealtime()) / 1000L
+        if (remain > LOCKOUT_MAX_SECONDS) {
+            prefs.edit().remove(KEY_LOCKED_UNTIL_MS).apply()
+            return 0L
+        }
         return if (remain > 0) remain else 0L
     }
 
@@ -73,7 +93,7 @@ class AuthStore(context: Context) {
         if (attempts >= LOCKOUT_THRESHOLD) {
             val extraSteps = attempts - LOCKOUT_THRESHOLD
             val backoffSeconds = (LOCKOUT_BASE_SECONDS shl minOf(extraSteps, 6)).coerceAtMost(LOCKOUT_MAX_SECONDS)
-            editor.putLong(KEY_LOCKED_UNTIL_MS, System.currentTimeMillis() + backoffSeconds * 1000L)
+            editor.putLong(KEY_LOCKED_UNTIL_MS, SystemClock.elapsedRealtime() + backoffSeconds * 1000L)
         }
         editor.apply()
     }

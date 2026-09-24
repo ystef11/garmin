@@ -23,7 +23,31 @@ object CryptoManager {
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
 
+    /**
+     * Правка 2026-09-24 (ревью п.4 "Резервная копия Android: падение после восстановления"):
+     * если файл runstef_secure_prefs был восстановлен из бэкапа, сделанного ДО того, как этот
+     * файл исключили из бэкапа (см. res/xml/backup_rules.xml, data_extraction_rules.xml), ключ
+     * из Android Keystore, которым он зашифрован, недоступен на новом устройстве (Keystore
+     * привязан к конкретному устройству и бэкапом не переносится) - EncryptedSharedPreferences.
+     * create() бросает исключение прямо здесь, а это вызывается из AuthStore при самом старте
+     * приложения, так что без обработки приложение падало сразу после восстановления из бэкапа,
+     * без единого шанса на самовосстановление. Теперь при ошибке чтения/расшифровки удаляем
+     * повреждённый файл и создаём заново с чистого листа - пользователь просто увидит экран
+     * первого входа (задать ПИН заново, перелогиниться в Garmin) вместо краша.
+     */
     fun securePrefs(context: Context): SharedPreferences =
+        try {
+            createSecurePrefs(context)
+        } catch (e: Exception) {
+            context.deleteSharedPreferences(PREFS_NAME)
+            // Вместе с ПИН-кодом сбрасываем и сохранённые входы Garmin: иначе после сброса префов
+            // экран блокировки увидел бы «аккаунты есть, ПИН не задан» и предложил задать НОВЫЙ
+            // ПИН — то есть доступ к аккаунтам без старого ПИН. Пользователь просто войдёт заново.
+            File(context.filesDir, "garth").deleteRecursively()
+            createSecurePrefs(context)
+        }
+
+    private fun createSecurePrefs(context: Context): SharedPreferences =
         EncryptedSharedPreferences.create(
             context,
             PREFS_NAME,

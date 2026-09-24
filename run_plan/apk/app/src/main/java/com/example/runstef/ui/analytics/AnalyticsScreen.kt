@@ -76,9 +76,16 @@ import java.time.ZoneOffset
  * то, что нужно для «догрузить свежее»; если база ещё пуста, по умолчанию берётся год назад.
  *
  * Первая загрузка требует явно указать период — это осознанно: на телефоне тянуть сразу весь
- * возможный год активностей+самочувствия дорого по трафику и времени. При следующих открытиях
- * вкладки, если для аккаунта уже есть непустая база, запускается тихое авто-обновление (только
- * новые дни, см. AnalyticsViewModel.autoCatchUp).
+ * возможный год активностей+самочувствия дорого по трафику и времени.
+ *
+ * ИСПРАВЛЕНО (ревью п.16, таблица "стале-комментарии/мёртвый autoCatchUp"): этот docstring
+ * раньше утверждал, что "при следующих открытиях вкладки запускается тихое авто-обновление
+ * (AnalyticsViewModel.autoCatchUp)" — неверно уже с 2026-08-23 (см. комментарий у отключённого
+ * вызова ниже, LaunchedEffect с account): по явному запросу пользователя авто-догрузка
+ * отключена, обновление данных теперь только по нажатию «Импортировать тренировки». Сам метод
+ * AnalyticsViewModel.autoCatchUp() оставлен в коде НЕ вызываемым ниоткуда (мог бы пригодиться,
+ * если авто-догрузку решат вернуть, например под отдельный тумблер в настройках) — но раз он
+ * сейчас мёртвый код, этот docstring больше не должен описывать его как активное поведение.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -113,6 +120,7 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
     val activityCount by vm.activityCount.collectAsState()
     val reportPath by vm.reportPath.collectAsState()
     val cancelRequested by vm.cancelRequested.collectAsState()
+    val busyOther by vm.busyOther.collectAsState()
 
     LaunchedEffect(Unit) {
         // По умолчанию при открытии вкладки в поле подставляется ОСНОВНОЙ аккаунт (см.
@@ -235,8 +243,16 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
             // пользователь закончил править поле. Теперь обе даты должны быть валидны целиком.
             val startDateValid = runCatching { LocalDate.parse(startDate) }.isSuccess
             val endDateValid = endDate.isBlank() || runCatching { LocalDate.parse(endDate) }.isSuccess
-            val importButtonEnabled = !isRunning && account.isNotBlank() && startDateValid && endDateValid
-            val importMenuEnabled = account.isNotBlank() && !isRunning
+            val importButtonEnabled = !isRunning && !busyOther && account.isNotBlank() && startDateValid && endDateValid
+            val importMenuEnabled = account.isNotBlank() && !isRunning && !busyOther
+            if (busyOther) {
+                Text(
+                    "Идёт экспорт плана — загрузка и отчёт станут доступны после его окончания.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
             // Пока идёт импорт/авто-догрузка, на месте этой капсулы ("Загрузить тренировки" +
             // стрелка меню) показываем кнопку «Стоп» — по месту, где пользователь только что
             // нажал загрузку, а не отдельным элементом внизу под «Построить отчёт» (см. правку
@@ -337,7 +353,7 @@ fun AnalyticsScreen(onOpenReport: (String) -> Unit) {
             // "так же выделена кнопка 'импортировать тренировки', хотя главная - 'построить
             // отчет'") - обычная закрашенная Button (акцентная), импорт выше - OutlinedButton.
             Button(
-                enabled = lastActivityDate != null && !isRunning,
+                enabled = lastActivityDate != null && !isRunning && !busyOther,
                 onClick = { vm.buildReport(account.trim()) },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
             ) { Text("Построить отчёт") }

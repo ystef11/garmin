@@ -1,13 +1,23 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Правила автобэкапа для API < 31 (на 31+ используется data_extraction_rules.xml).
+   См. https://developer.android.com/guide/topics/data/autobackup
+
+   Правка 2026-09-24 (ревью п.4 "Резервная копия Android: падение после восстановления,
+   медицинские данные в облаке"): раньше этот файл был пустым шаблоном (никаких <exclude> -
+   значит бэкапятся АБСОЛЮТНО ВСЕ данные приложения, включая секреты и здоровье). Проблема
+   была двойная:
+   1) runstef_secure_prefs (EncryptedSharedPreferences, см. security/CryptoManager.kt) шифруется
+      ключом из Android Keystore, который сам НЕ переносится бэкапом (Keystore привязан к
+      конкретному устройству) - на новом телефоне зашифрованный файл восстанавливался, а ключ к
+      нему нет, и EncryptedSharedPreferences.create() бросал исключение прямо при старте
+      (см. security/AuthStore.kt) - приложение падало сразу после восстановления из бэкапа.
+   2) files/analytics/ и files/garth/ - локальные базы аналитики (пульс, ВСР, сон, SpO2 - см.
+      data/AnalyticsDb.kt) и токены входа Garmin - улетали в бэкап Google без ведома пользователя.
+   Оба каталога/файл теперь явно исключены из бэкапа.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="sharedpref" path="runstef_secure_prefs.xml" />
+    <exclude domain="file" path="garth/" />
+    <exclude domain="file" path="analytics/" />
 </full-backup-content>

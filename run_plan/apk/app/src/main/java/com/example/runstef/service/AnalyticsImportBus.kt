@@ -5,6 +5,7 @@ import com.example.runstef.data.AnalyticsDb
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * Общее состояние процесса импорта/автообновления/сборки отчёта аналитики. Раньше жило как
@@ -18,8 +19,30 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object AnalyticsImportBus {
 
+    /** Вид долгой операции. Шина одна (сервис одновременно выполняет только одну операцию), но
+     * лог и кнопка «Стоп» у импорта аналитики и у экспорта плана — свои: иначе во время импорта
+     * на вкладке «Экспорт» показывался бы лог импорта, а «Стоп» там останавливал бы импорт. */
+    enum class Operation { ANALYTICS, EXPORT }
+
+    private const val MAX_LOG_LINES = 3000
+
+    @Volatile
+    private var currentOp: Operation = Operation.ANALYTICS
+
+    private val _operation = MutableStateFlow<Operation?>(null)
+    /** Операция, которая выполняется сейчас (null — ничего не выполняется). */
+    val operation: StateFlow<Operation?> = _operation.asStateFlow()
+
     private val _log = MutableStateFlow<List<String>>(emptyList())
+    /** Лог импорта/отчёта аналитики. */
     val log: StateFlow<List<String>> = _log.asStateFlow()
+
+    private val _exportLog = MutableStateFlow<List<String>>(emptyList())
+    /** Лог экспорта плана (Garmin/intervals.icu). */
+    val exportLog: StateFlow<List<String>> = _exportLog.asStateFlow()
+
+    private fun logFlow(): MutableStateFlow<List<String>> =
+        if (currentOp == Operation.EXPORT) _exportLog else _log
 
     private val _isRunning = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
@@ -61,13 +84,56 @@ object AnalyticsImportBus {
     private val _cancelRequested = MutableStateFlow(false)
     val cancelRequested: StateFlow<Boolean> = _cancelRequested.asStateFlow()
 
-    fun appendLog(line: String) { _log.value = _log.value + line }
-    fun clearLog() { _log.value = emptyList() }
-    fun setRunning(running: Boolean) { _isRunning.value = running }
+    // Атомарный флаг занятости (правка 2026-09-24, см. ревью п.5 "Сервис импорта может
+    // остановить сам себя"): раньше занятость проверялась через `if (isRunning.value)`, а
+    // выставлялась отдельным следующим вызовом `setRunning(true)` - между этими двумя шагами
+    // мог проскочить второй параллельный запрос (двойной тап по «Импорт»), который тоже видел
+    // isRunning=false и тоже считал себя вправе стартовать. tryStart() делает проверку и
+    // захват одной атомарной операцией (AtomicBoolean.compareAndSet).
+    private val busy = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    // ИСПРАВЛЕНО (ревью п.16, таблица): раньше _log.value = _log.value + line - это
+    // НЕ атомарная операция (read-modify-write из двух отдельных шагов): appendLog
+    // может звать и AnalyticsImportService (фоновый поток сервиса), и, теоретически,
+    // UI - два конкурентных вызова могли оба прочитать одно и то же старое значение
+    // _log.value и один из них тихо затирал бы добавленную другим строку. update{}
+    // делает это атомарно (compareAndSet-цикл MutableStateFlow), как и tryStart()/
+    // finish() выше для busy.
+    fun appendLog(line: String) { logFlow().update { (it + line).takeLast(MAX_LOG_LINES) } }
+    fun clearLog() { logFlow().value = emptyList() }
+    fun setRunning(running: Boolean) { _isRunning.value = running; busy.set(running); if (!running) _operation.value = null }
     fun setReportPath(path: String?) { _reportPath.value = path }
     fun setProgress(percent: Int?) { _progress.value = percent }
     fun requestCancel() { _cancelRequested.value = true }
     fun clearCancel() { _cancelRequested.value = false }
+
+    /** Атомарно занимает шину под новую операцию. Возвращает false, если уже что-то
+     * выполняется - вызывающий в этом случае ничего не должен запускать (и, если он уже успел
+     * что-то создать под эту попытку - например, отправить Intent сервису - должен это
+     * аккуратно свернуть, не трогая уже идущую операцию). Предпочтительна вместо ручной пары
+     * `if (isRunning.value) return; setRunning(true)`. */
+    fun tryStart(op: Operation = Operation.ANALYTICS): Boolean {
+        if (!busy.compareAndSet(false, true)) return false
+        currentOp = op
+        _operation.value = op
+        _cancelRequested.value = false
+        _isRunning.value = true
+        return true
+    }
+
+    /** Сообщение «занято» — в лог той операции, которую пытались запустить (а не текущей). */
+    fun logBusy(op: Operation) {
+        val flow = if (op == Operation.EXPORT) _exportLog else _log
+        val running = if (_operation.value == Operation.EXPORT) "экспорт плана" else "операция аналитики"
+        flow.update { (it + "Уже выполняется $running — дождитесь её завершения или нажмите «Стоп».").takeLast(MAX_LOG_LINES) }
+    }
+
+    /** Освобождает шину по завершении операции (успех/ошибка/отмена) - парная к tryStart(). */
+    fun finish() {
+        _isRunning.value = false
+        _operation.value = null
+        busy.set(false)
+    }
 
     /** Помечает [account] как аккаунт, который сейчас выбран/показан на экране аналитики --
      * вызывается ТОЛЬКО из явного пользовательского переключения (AnalyticsViewModel.

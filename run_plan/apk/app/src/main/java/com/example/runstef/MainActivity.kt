@@ -1,11 +1,15 @@
 package com.example.runstef
 
+import android.Manifest
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -36,9 +40,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -49,7 +55,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
 import com.example.runstef.data.PlanRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.example.runstef.data.VersionCompare
 import com.example.runstef.network.garmin.GarminTokenStore
 import com.example.runstef.ui.analytics.AnalyticsReportScreen
@@ -89,10 +97,22 @@ private val bottomDestinations = listOf(Dest.Home, Dest.Plans, Dest.Export, Dest
  * (или после того, как систему убила процесс) и по кнопке "Заблокировать" — см. RunstefApp.
  */
 class MainActivity : FragmentActivity() {
+
+    // ИСПРАВЛЕНО (ревью п.16, таблица "POST_NOTIFICATIONS"): разрешение объявлено в манифесте,
+    // но на Android 13+ (API 33, targetSdk тут 36) это dangerous-разрешение — без runtime-
+    // запроса система молча не показывает уведомления foreground-сервиса (AnalyticsImportService
+    // — прогресс импорта/экспорта), сама служба при этом продолжает работать, просто
+    // пользователь не видит прогресс/кнопку «Стоп» в шторке. Лаунчер регистрируется здесь (в
+    // теле класса, до onCreate) — так требует registerForActivityResult (до перехода Activity в
+    // STARTED). Результат (дали/не дали) не блокирует ничего дальше — это best-effort.
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* дали или отказали - в обоих случаях просто продолжаем; сервис работает и без уведомлений */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Должен вызываться до super.onCreate — иначе тема Theme.Runstef.Starting
         // не подхватится и система покажет свой автогенерированный (обрезающий иконку) сплэш.
-        installSplashScreen()
+        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // Только для debug-сборки (android:debuggable) — позволяет открыть chrome://inspect
@@ -102,18 +122,36 @@ class MainActivity : FragmentActivity() {
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
             WebView.setWebContentsDebuggingEnabled(true)
         }
-        // Открываем вкладку «Мои планы» по умолчанию, если есть хотя бы один сохранённый план.
-        val hasPlans = PlanRepository(this).listPlans().isNotEmpty()
-        setContent {
-            RunstefTheme {
-                val authViewModel: AuthViewModel = viewModel()
-                val homeViewModel: HomeViewModel = viewModel()
-                RunstefApp(
-                    activity = this,
-                    authViewModel = authViewModel,
-                    homeViewModel = homeViewModel,
-                    startDestination = if (hasPlans) Dest.Plans.route else Dest.Home.route
-                )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        // ИСПРАВЛЕНО (ревью п.15 "Main-thread blocking work"): PlanRepository(this).listPlans()
+        // читает и парсит файлы планов с диска — раньше вызывалось синхронно здесь, в onCreate
+        // на главном потоке, ДО setContent, блокируя UI при заметном числе сохранённых планов.
+        // Теперь сплэш-экран держится (setKeepOnScreenCondition), пока список планов не
+        // загрузится в фоне (Dispatchers.IO), а setContent (и сам первый Compose-кадр)
+        // выполняется уже с готовым startDestination — на главном потоке остаётся только
+        // isNotEmpty()/выбор маршрута, не файловый I/O.
+        var plansLoaded = false
+        splashScreen.setKeepOnScreenCondition { !plansLoaded }
+        lifecycleScope.launch {
+            val hasPlans = withContext(Dispatchers.IO) {
+                PlanRepository(this@MainActivity).listPlans().isNotEmpty()
+            }
+            plansLoaded = true
+            setContent {
+                RunstefTheme {
+                    val authViewModel: AuthViewModel = viewModel()
+                    val homeViewModel: HomeViewModel = viewModel()
+                    RunstefApp(
+                        activity = this@MainActivity,
+                        authViewModel = authViewModel,
+                        homeViewModel = homeViewModel,
+                        startDestination = if (hasPlans) Dest.Plans.route else Dest.Home.route
+                    )
+                }
             }
         }
     }
@@ -324,14 +362,15 @@ private fun RunstefApp(
     val skippedVersion by homeViewModel.skippedVersion.collectAsState()
     val update = effectiveConfig?.update
     val ownVersion = effectiveConfig?.ownVersion
-    if (update != null && ownVersion != null && !updateDismissed && update.latestVersion != skippedVersion &&
-        VersionCompare.isNewer(update.latestVersion, ownVersion)
+    if (update != null && ownVersion != null && effectiveConfig?.updateAvailable == true &&
+        !updateDismissed && update.skipKey != skippedVersion
     ) {
         UpdateAvailableDialog(
             latestVersion = update.latestVersion,
             apkUrl = update.apkUrl,
             onDismiss = { homeViewModel.dismissUpdate() },
-            onSkip = { homeViewModel.skipVersion(update.latestVersion) }
+            onSkip = { homeViewModel.skipVersion(update.skipKey) },
+            expectedSha256 = update.sha256
         )
     }
 }

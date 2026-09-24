@@ -270,7 +270,9 @@ class GarminApi(
         // ExportViewModel.cancelExport / AnalyticsImportBus.cancelRequested) - опрашивается
         // между запросами, т.к. этот метод не suspend и job.cancel() не прервёт блокирующий
         // HTTP-вызов внутри него. По умолчанию no-op.
-        isCancelled: () -> Boolean = { false }
+        isCancelled: () -> Boolean = { false },
+        // Прогресс «день N из M» для уведомления сервиса. По умолчанию no-op.
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }
     ): Result {
         val tag = plan.meta.tag
         val allItems = buildItems(plan, skipCross)
@@ -306,60 +308,163 @@ class GarminApi(
             return Result(dryRun = true, count = items.size)
         }
 
-        // Перед созданием всегда чистим в Garmin уже существующие тренировки с ТАКИМИ ЖЕ
-        // именами, что и сейчас загружаемые — защита от дублей и расхождений при повторном
-        // запуске/перезаливке плана (как в десктопном скрипте). Без этого шага возможны
-        // дубли даже если чистить только прошедшие тренировки — расписание на будущее
-        // могло измениться в новой версии плана при том же имени.
-        try {
-            val namesToUpload = items.map { it.name }.toSet()
-            val existingText = auth.connectApi(tokens, "/workout-service/workouts?start=0&limit=999")
-                .use { it.body?.string() ?: "[]" }
-            val existing = runCatching { Json.parseToJsonElement(existingText).jsonArray }.getOrNull()
-            val dupes = existing?.filter { (it.jsonObject["workoutName"]?.jsonPrimitive?.content ?: "") in namesToUpload } ?: emptyList()
-            if (dupes.isNotEmpty()) {
-                log("Удаляю ${dupes.size} уже существующих тренировок с такими же именами (чтобы не плодить дубли)…")
-                var removedDupes = 0
-                for (obj in dupes) {
-                    if (isCancelled()) throw ImportCancelledException()
-                    val id = obj.jsonObject["workoutId"]?.jsonPrimitive?.content ?: continue
-                    try {
-                        auth.connectApi(tokens, "/workout-service/workout/$id", "DELETE").close()
-                        removedDupes++
-                    } catch (e: Exception) {
-                        log("  FAIL удаления дубля workoutId=$id -> ${e.message}")
-                    }
-                    Thread.sleep(200)
-                }
-                log("Удалено дублей: $removedDupes")
-            }
-        } catch (e: Exception) {
-            log("Не удалось проверить существующие тренировки перед загрузкой (${e.message}) — продолжаю без автоочистки.")
+        // Загрузка ПО ДНЯМ. Для каждого дня плана: сначала создаём ВСЕ тренировки этого дня и
+        // ставим их в календарь (проверяя код ответа обоих запросов), и только если весь день
+        // загрузился — удаляем старые тренировки этого плана на эту дату. Если хоть одна
+        // тренировка дня не загрузилась, старые этого дня не трогаем. Так при любом обрыве
+        // (истёк вход, сеть, 429) в календаре остаётся старая или новая версия дня, максимум
+        // один лишний дубль, и не бывает дня без тренировки. «Стоп» проверяется между днями.
+        require(tag.isNotBlank()) { "У плана не задан тег — загрузка отменена (по тегу ищутся старые тренировки плана в календаре)." }
+        val rangeFrom = items.first().date
+        val rangeTo = items.last().date
+        val calendar = fetchCalendarRange(tokens, rangeFrom, rangeTo)
+        if (calendar.failedMonths.isNotEmpty()) {
+            log("Не удалось прочитать календарь Garmin за ${calendar.failedMonths.joinToString()} — старые тренировки в эти месяцы не будут удалены (возможны дубли).")
         }
+        val oldByDate: Map<LocalDate, List<CalendarItem>> = calendar.items
+            .filter { it.title.startsWith("$tag ") }
+            .groupBy { it.date }
 
         var ok = 0
         var fail = 0
-        for (item in items) {
+        var replaced = 0
+        var deleted = 0
+        val itemsByDate = items.groupBy { it.date }.toSortedMap()
+        val totalDays = itemsByDate.size
+        var dayIdx = 0
+
+        for ((date, dayItems) in itemsByDate) {
             if (isCancelled()) throw ImportCancelledException()
-            try {
-                val (postCode, postSuccessful, postText) = auth.connectApi(
-                    tokens, "/workout-service/workout", "POST",
-                    Json.encodeToString(JsonObject.serializer(), item.workoutJson)
-                ).use { Triple(it.code, it.isSuccessful, it.body?.string() ?: "{}") }
-                if (!postSuccessful) throw RuntimeException("HTTP $postCode: ${postText.take(300)}")
-                val workoutId = Json.parseToJsonElement(postText).jsonObject["workoutId"]?.jsonPrimitive?.content
-                    ?: throw RuntimeException("Ответ без workoutId: ${postText.take(300)}")
-                val scheduleBody = buildJsonObject { put("date", item.date.toString()) }
-                auth.connectApi(tokens, "/workout-service/schedule/$workoutId", "POST", Json.encodeToString(JsonObject.serializer(), scheduleBody)).close()
-                log("OK   ${item.date}  ${item.name}  (id=$workoutId)")
-                ok++
-            } catch (e: Exception) {
-                log("FAIL ${item.date}  ${item.name} -> ${e.message}")
-                fail++
+            dayIdx++
+            val createdIds = mutableSetOf<String>()
+            var dayOk = true
+            for (item in dayItems) {
+                try {
+                    val workoutId = createAndSchedule(tokens, item)
+                    createdIds.add(workoutId)
+                    log("OK   ${item.date}  ${item.name}  (id=$workoutId)")
+                    ok++
+                } catch (e: Exception) {
+                    log("FAIL ${item.date}  ${item.name} -> ${e.message}")
+                    fail++
+                    dayOk = false
+                }
+                Thread.sleep(400) // как в десктопе — иначе Garmin API может резать частые запросы (429)
             }
-            Thread.sleep(400) // как в десктопе — иначе Garmin API может резать частые запросы (429)
+            if (dayOk) {
+                for (old in oldByDate[date].orEmpty()) {
+                    if (old.workoutId in createdIds) continue
+                    if (deleteWorkout(tokens, old.workoutId, date)) replaced++
+                    Thread.sleep(200)
+                }
+            } else if (oldByDate[date].orEmpty().isNotEmpty()) {
+                log("  $date: день загрузился не полностью — старые тренировки этого дня оставлены.")
+            }
+            onProgress(dayIdx, totalDays)
         }
-        log("Готово: $ok создано, $fail с ошибкой.")
-        return Result(ok = ok, fail = fail)
+
+        // Тренировки этого плана на датах, которых в новой версии нет, — только внутри
+        // диапазона загрузки [rangeFrom, rangeTo] (календарь читается целыми месяцами, и без
+        // этого ограничения удалялись бы прошедшие дни текущего месяца). Не выполняется в режиме
+        // «Тест первой недели» и на датах, где все тренировки отфильтрованы skipCross (там
+        // пользователь сам решил их не загружать, а не убрать из плана).
+        if (!testFirstWeek) {
+            val skippedDates = allItemsBeforeFilter(plan).filter { it !in itemsByDate.keys }.toSet()
+            for ((date, olds) in oldByDate) {
+                if (date < rangeFrom || date > rangeTo) continue
+                if (date in itemsByDate.keys || date in skippedDates) continue
+                if (isCancelled()) throw ImportCancelledException()
+                for (old in olds) {
+                    if (deleteWorkout(tokens, old.workoutId, date)) deleted++
+                    Thread.sleep(200)
+                }
+            }
+        }
+
+        log("Готово: создано $ok, заменено старых $replaced, удалено устаревших $deleted, с ошибкой $fail.")
+        return Result(ok = ok, fail = fail, cleared = replaced + deleted)
+    }
+
+    /** Все даты плана, на которых есть хоть какая-то тренировка (до фильтра skipCross) — чтобы
+     * не считать «убранными из плана» дни, где кросс просто отключён фильтром. */
+    private fun allItemsBeforeFilter(plan: RunPlan): List<LocalDate> =
+        plan.workouts.mapNotNull { runCatching { LocalDate.parse(it.date) }.getOrNull() }.distinct()
+
+    /** Создаёт тренировку и ставит её в календарь; возвращает workoutId или бросает исключение. */
+    private fun createAndSchedule(tokens: GarminTokens, item: PlanItem): String {
+        val (postCode, postSuccessful, postText) = auth.connectApi(
+            tokens, "/workout-service/workout", "POST",
+            Json.encodeToString(JsonObject.serializer(), item.workoutJson)
+        ).use { Triple(it.code, it.isSuccessful, it.body?.string() ?: "{}") }
+        if (!postSuccessful) throw RuntimeException("HTTP $postCode: ${postText.take(300)}")
+        val workoutId = Json.parseToJsonElement(postText).jsonObject["workoutId"]?.jsonPrimitive?.content
+            ?: throw RuntimeException("Ответ без workoutId: ${postText.take(300)}")
+
+        val scheduleBody = buildJsonObject { put("date", item.date.toString()) }
+        val (schCode, schSuccessful, schText) = auth.connectApi(
+            tokens, "/workout-service/schedule/$workoutId", "POST",
+            Json.encodeToString(JsonObject.serializer(), scheduleBody)
+        ).use { Triple(it.code, it.isSuccessful, it.body?.string() ?: "") }
+        if (!schSuccessful) {
+            // Тренировка без даты в календаре никому не нужна — убираем её из библиотеки, чтобы
+            // не копились «сироты», и считаем день незагруженным.
+            runCatching { auth.connectApi(tokens, "/workout-service/workout/$workoutId", "DELETE").close() }
+            throw RuntimeException("не встала в календарь: HTTP $schCode: ${schText.take(300)}")
+        }
+        return workoutId
+    }
+
+    /** Удаляет тренировку по workoutId (вместе со всеми её датами в календаре). true — если
+     * Garmin ответил успехом; 404 (уже удалена) тоже считаем успехом. */
+    private fun deleteWorkout(tokens: GarminTokens, workoutId: String, date: LocalDate): Boolean {
+        return try {
+            val code = auth.connectApi(tokens, "/workout-service/workout/$workoutId", "DELETE").use { it.code }
+            if (code in 200..299 || code == 404) true
+            else { log("  FAIL удаления старой тренировки $date id=$workoutId -> HTTP $code"); false }
+        } catch (e: Exception) {
+            log("  FAIL удаления старой тренировки $date id=$workoutId -> ${e.message}")
+            false
+        }
+    }
+
+    /** Элемент календаря Garmin типа "workout". ВАЖНО: поле `id` в ответе календаря — это id
+     * записи календаря, а id самой тренировки — отдельное поле `workoutId` (удалять нужно по нему). */
+    data class CalendarItem(val workoutId: String, val title: String, val date: LocalDate)
+
+    private class CalendarRange(val items: List<CalendarItem>, val failedMonths: List<String>)
+
+    private fun fetchCalendarMonth(tokens: GarminTokens, year: Int, month1: Int): List<CalendarItem> {
+        // Garmin отдаёт месяц 0-based (0=январь) в отличие от java.time.
+        val (code, text) = auth.connectApi(tokens, "/calendar-service/year/$year/month/${month1 - 1}")
+            .use { it.code to (it.body?.string() ?: "") }
+        if (code !in 200..299) throw RuntimeException("HTTP $code")
+        val root = Json.parseToJsonElement(text) as? JsonObject ?: throw RuntimeException("неожиданный ответ")
+        val items = root["calendarItems"] as? kotlinx.serialization.json.JsonArray ?: return emptyList()
+        return items.mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            if ((o["itemType"] as? JsonPrimitive)?.content != "workout") return@mapNotNull null
+            val workoutId = (o["workoutId"] as? JsonPrimitive)?.content
+                ?.takeIf { it.isNotBlank() && it != "null" } ?: return@mapNotNull null
+            val title = (o["title"] as? JsonPrimitive)?.content ?: ""
+            val date = (o["date"] as? JsonPrimitive)?.content
+                ?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() } ?: return@mapNotNull null
+            CalendarItem(workoutId, title, date)
+        }
+    }
+
+    private fun fetchCalendarRange(tokens: GarminTokens, from: LocalDate, to: LocalDate): CalendarRange {
+        val result = mutableListOf<CalendarItem>()
+        val failed = mutableListOf<String>()
+        var cur = java.time.YearMonth.from(from)
+        val end = java.time.YearMonth.from(to)
+        while (!cur.isAfter(end)) {
+            try {
+                result += fetchCalendarMonth(tokens, cur.year, cur.monthValue)
+            } catch (e: Exception) {
+                failed += "$cur (${e.message})"
+            }
+            cur = cur.plusMonths(1)
+        }
+        return CalendarRange(result.distinctBy { it.workoutId to it.date }, failed)
     }
 }

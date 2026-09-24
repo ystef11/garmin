@@ -2,11 +2,15 @@ package com.example.runstef.ui.auth
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.runstef.security.AuthStore
 import com.example.runstef.security.BiometricAuth
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Состояние разблокировки ВСЕГО приложения (защита включается, только если есть хотя бы один
@@ -37,16 +41,27 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
      * ней — это самый частый выбор, и до этой правки пользователь должен был отдельно находить
      * тумблер в «Настройках»; ПИН при этом всё равно остаётся обязательным запасным вариантом.
      */
+    // ИСПРАВЛЕНО (ревью п.15 "Main-thread blocking work"): setPin/verifyPin внутри считают
+    // PBKDF2-HMAC-SHA256 на 120_000 итераций (см. AuthStore.ITERATIONS) — специально дорогая
+    // операция (защита от подбора ПИН), десятки-сотни мс. Раньше всё это выполнялось прямо в
+    // синхронных методах, вызываемых из UI-колбэков (Compose onClick/onDigit) — то есть на
+    // главном потоке, с заметным подвисанием ввода на каждую цифру ПИН. Теперь тяжёлая часть
+    // уходит на Dispatchers.Default: setupPin — фоново без ожидания результата (UI ничего не
+    // получает синхронно), tryUnlockWithPin/changePin — suspend-функции (см. новые сигнатуры
+    // onVerify/onSubmit в LockScreen.kt/SecurityScreen.kt, которые теперь запускают вызов через
+    // rememberCoroutineScope().launch{} вместо прямого вызова в колбэке).
     fun setupPin(pin: String) {
-        authStore.setPin(pin)
-        if (BiometricAuth.isAvailable(getApplication())) {
-            authStore.biometricEnabled = true
+        viewModelScope.launch(Dispatchers.Default) {
+            authStore.setPin(pin)
+            if (BiometricAuth.isAvailable(getApplication())) {
+                authStore.biometricEnabled = true
+            }
+            _unlocked.value = true
         }
-        _unlocked.value = true
     }
 
-    fun tryUnlockWithPin(pin: String): Boolean {
-        val ok = authStore.verifyPin(pin)
+    suspend fun tryUnlockWithPin(pin: String): Boolean {
+        val ok = withContext(Dispatchers.Default) { authStore.verifyPin(pin) }
         if (ok) _unlocked.value = true
         return ok
     }
@@ -59,10 +74,10 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Смена ПИН из экрана настроек безопасности — требует текущий ПИН. */
-    fun changePin(oldPin: String, newPin: String): Boolean {
-        if (!authStore.verifyPin(oldPin)) return false
+    suspend fun changePin(oldPin: String, newPin: String): Boolean = withContext(Dispatchers.Default) {
+        if (!authStore.verifyPin(oldPin)) return@withContext false
         authStore.setPin(newPin)
-        return true
+        true
     }
 
     fun lockNow() {

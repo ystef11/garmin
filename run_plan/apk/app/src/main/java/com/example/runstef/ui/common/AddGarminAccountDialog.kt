@@ -69,7 +69,7 @@ fun AddGarminAccountDialog(
         error = null
         scope.launch {
             try {
-                val auth = GarminAuth()
+                val auth = GarminAuth(context = context)
                 val tokens = withContext(Dispatchers.IO) {
                     auth.login(trimmedEmail, password, mfaPrompt = GarminAuth.MfaPrompt {
                         val deferred = CompletableDeferred<String>()

@@ -1,19 +1,22 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Правила бэкапа/переноса для API 31+ (на <31 используется backup_rules.xml).
+   См. https://developer.android.com/about/versions/12/backup-restore#xml-changes
+
+   Правка 2026-09-24 (ревью п.4) - см. подробное объяснение в backup_rules.xml. Здесь то же
+   самое исключение (зашифрованные настройки и локальные базы/токены), но отдельно для
+   облачного бэкапа (cloud-backup) и переноса на новое устройство по кабелю/через Google-сервис
+   переноса (device-transfer) - у обоих свой независимый список исключений.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="runstef_secure_prefs.xml" />
+        <exclude domain="file" path="garth/" />
+        <exclude domain="file" path="analytics/" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="runstef_secure_prefs.xml" />
+        <exclude domain="file" path="garth/" />
+        <exclude domain="file" path="analytics/" />
     </device-transfer>
-    -->
 </data-extraction-rules>

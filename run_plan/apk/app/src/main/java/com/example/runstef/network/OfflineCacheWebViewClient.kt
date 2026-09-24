@@ -66,16 +66,21 @@ class OfflineCacheWebViewClient(
 
         if (isOnline()) {
             try {
-                val response = client.newCall(Request.Builder().url(url.toString()).build()).execute()
-                if (response.isSuccessful) {
-                    val bytes = response.body?.bytes()
-                    val mime = response.header("Content-Type")?.substringBefore(";")?.trim()
-                        ?: guessMime(url.toString())
-                    val encoding = response.header("Content-Type")?.substringAfter("charset=", "utf-8")?.trim() ?: "utf-8"
-                    if (bytes != null) {
-                        bodyFile.writeBytes(bytes)
-                        metaFile.writeText("$mime\n$encoding")
-                        return WebResourceResponse(mime, encoding, ByteArrayInputStream(bytes))
+                // ИСПРАВЛЕНО (ревью п.9): при неуспешном ответе (не 2xx) тело раньше не
+                // закрывалось вообще — response.use{} закрывает соединение в любом случае,
+                // успешном или нет.
+                client.newCall(Request.Builder().url(url.toString()).build()).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val bytes = response.body?.bytes()
+                        val mime = response.header("Content-Type")?.substringBefore(";")?.trim()
+                            ?: guessMime(url.toString())
+                        val encoding = response.header("Content-Type")?.substringAfter("charset=", "utf-8")?.trim() ?: "utf-8"
+                        if (bytes != null) {
+                            bodyFile.writeBytes(bytes)
+                            metaFile.writeText("$mime\n$encoding")
+                            trimCacheIfNeeded()
+                            return WebResourceResponse(mime, encoding, ByteArrayInputStream(bytes))
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -91,6 +96,24 @@ class OfflineCacheWebViewClient(
         }
 
         return super.shouldInterceptRequest(view, request)
+    }
+
+    // ИСПРАВЛЕНО (ревью п.9 "кэш растёт без ограничений"): раньше файлы в webcache/ не
+    // удалялись НИКОГДА (каждый новый URL - новые .body/.meta файлы) - с учётом того, что
+    // ключом раньше был полный URL с query (см. ToolUrlBuilder), это могло дать тысячи файлов
+    // за долгое время использования. Простой лимит по суммарному размеру, без LRU-метаданных -
+    // удаляем самые старые по mtime файлы, пока не уложимся в бюджет; вызывается после каждой
+    // успешной записи, так что кэш никогда надолго не превышает лимит намного.
+    private fun trimCacheIfNeeded(maxBytes: Long = 20L * 1024 * 1024) {
+        val files = cacheDir.listFiles() ?: return
+        var total = files.sumOf { it.length() }
+        if (total <= maxBytes) return
+        val oldestFirst = files.sortedBy { it.lastModified() }
+        for (f in oldestFirst) {
+            if (total <= maxBytes) break
+            total -= f.length()
+            f.delete()
+        }
     }
 
     private fun guessMime(url: String): String = when {

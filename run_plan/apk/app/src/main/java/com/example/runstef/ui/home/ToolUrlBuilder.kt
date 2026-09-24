@@ -1,7 +1,6 @@
 package com.example.runstef.ui.home
 
 import android.content.Context
-import androidx.core.net.toUri
 import com.example.runstef.data.AnalyticsDb
 import com.example.runstef.data.PlanHtmlParser
 import com.example.runstef.data.PlanRepository
@@ -48,20 +47,33 @@ object ToolUrlBuilder {
     }
 
     /**
-     * URL калькулятора геля (run/gel_calculator.html) с параметром carbs (суммарные углеводы,
-     * г, на сегодняшнюю тренировку) — ТОЛЬКО когда в основном плане («Мои планы» → сделан
-     * основным, см. PlanRepository.getDefaultPlan()/setDefaultPlan()) есть тренировка на
-     * сегодня и у неё есть питание (см. PlanHtmlParser.fuelTotalGramsFromNote()). Ключ carbs —
-     * стабильный query-параметр, не завязанный на текст кнопок/лейблов калькулятора: разбирается
+     * URL калькулятора геля (run/gel_calculator.html) с параметрами carbs (суммарные углеводы,
+     * г, на сегодняшнюю тренировку) и portion (размер покупной порции геля в граммах — 20 или
+     * 40, см. fuelFor() в run_plan_calculator.html) — ТОЛЬКО когда в основном плане («Мои
+     * планы» → сделан основным, см. PlanRepository.getDefaultPlan()/setDefaultPlan()) есть
+     * тренировка на сегодня и у неё есть питание (см. PlanHtmlParser.fuelTotalGrams()). Ключи
+     * carbs/portion — стабильные, не завязанные на текст кнопок/лейблов калькулятора: разбираются
      * в applyPrefill() в конце <script> в run/gel_calculator.html, меняйте оба конца вместе.
+     *
+     * ИСПРАВЛЕНО (ревью п.19 "Несовпадение плана и калькулятора геля"): раньше передавался
+     * только carbs — калькулятор геля делил его на СВОЙ дефолтный размер порции (25 г), который
+     * не совпадал с размером, из которого план на самом деле посчитал число гелей (20 или 40 г,
+     * см. PlanFuel.portion в PlanModels.kt) — итоговое число порций в калькуляторе расходилось с
+     * числом гелей, показанным в самом плане. Теперь передаётся и portion, а applyPrefill в
+     * gel_calculator.html сначала выставляет размер порции (setCarb(portion)), и только потом
+     * считает число порций от него — то же число, что и в плане.
      */
     private fun buildGel(context: Context, tool: CalculatorTool): String {
         val workout = PlanRepository(context).getTodayWorkout() ?: return tool.url
-        val carbs = PlanHtmlParser.fuelTotalGramsFromNote(workout.note) ?: return tool.url
-        return tool.url.toUri().buildUpon()
-            .appendQueryParameter("carbs", carbs.toString())
-            .build()
-            .toString()
+        val carbs = PlanHtmlParser.fuelTotalGrams(workout) ?: return tool.url
+        val portion = PlanHtmlParser.fuelPortionGrams(workout)
+        // ИСПРАВЛЕНО (ревью п.9 "Калькуляторы с автозаполнением не открываются офлайн, личные
+        // данные уходят на GitHub"): параметр — после "#" (URL fragment), а не в query-строке.
+        // Fragment НЕ уходит на сервер при загрузке страницы (значит не попадает в логи
+        // GitHub Pages) и не входит в ключ офлайн-кэша WebView (см. OfflineCacheWebViewClient —
+        // кэш ключуется по полному URL; с query каждое изменение прилетающих данных давало
+        // новый ключ, и калькулятор переставал открываться офлайн).
+        return if (portion != null) "${tool.url}#carbs=$carbs&portion=$portion" else "${tool.url}#carbs=$carbs"
     }
 
     private fun buildInternal(context: Context, tool: CalculatorTool): String {
@@ -128,9 +140,12 @@ object ToolUrlBuilder {
         }
 
         if (params.isEmpty()) return tool.url
-        val builder = tool.url.toUri().buildUpon()
-        params.forEach { (k, v) -> builder.appendQueryParameter(k, v) }
-        return builder.build().toString()
+        // См. объяснение в buildGel() выше — те же причины (офлайн-кэш WebView, приватность
+        // логов GitHub Pages), только параметров тут больше.
+        val frag = params.entries.joinToString("&") { (k, v) ->
+            "$k=${java.net.URLEncoder.encode(v, "UTF-8")}"
+        }
+        return "${tool.url}#$frag"
     }
 
     private fun trimNum(v: Double): String {

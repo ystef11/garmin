@@ -5,6 +5,12 @@ plugins {
     id("com.chaquo.python")
 }
 
+// Единственное место, где задаётся версия приложения (формат MAJOR.MINOR.PATCH).
+val appVersionName = "0.0.6"
+val appVersionCode = appVersionName.split(".").map { it.toInt() }.let { (major, minor, patch) ->
+    major * 10000 + minor * 100 + patch
+}
+
 base {
     archivesName.set("runstef")
 }
@@ -21,8 +27,14 @@ android {
         applicationId = "com.example.runstef"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        // Версия приложения ведётся в ОДНОМ месте — appVersionName ниже (вверху файла).
+        // versionCode вычисляется из неё автоматически, а тег релиза на GitHub должен
+        // совпадать с versionName (по тегу приложение понимает, что вышла новая версия, см.
+        // network/ReleaseChecker.kt). Для релиза: поднять appVersionName, собрать, создать
+        // релиз с тегом = appVersionName и приложить runstef-release.apk. Больше ничего
+        // руками заполнять не нужно.
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -53,6 +65,9 @@ android {
     }
     buildFeatures {
         compose = true
+        // Нужно для BuildConfig.VERSION_CODE/VERSION_NAME (см. VersionCompare/ConfigRepository) -
+        // AGP 8+ больше не генерирует BuildConfig по умолчанию.
+        buildConfig = true
     }
 }
 
@@ -61,11 +76,21 @@ chaquopy {
         version = "3.13"
         buildPython("py", "-3.13")
         pip {
-            // Та же тройка, что использует десктопный build_report.py -- матплотлиб тянет
-            // свои C-зависимости (kiwisolver, pillow, fonttools, contourpy) сам.
-            install("numpy")
-            install("pandas")
-            install("matplotlib")
+            // ИСПРАВЛЕНО (ревью п.16, таблица "pinned numpy/pandas/matplotlib versions"):
+            // раньше версии не были зафиксированы - install("numpy") тянет ту версию, для
+            // которой на момент СБОРКИ (не написания кода) есть прекомпилированное android-колесо
+            // в репозитории Chaquopy (https://chaquo.com/pypi-13.1/), а не последнюю версию с
+            // PyPI. Ключевая опасность: этот репозиторий со временем публикует НОВЫЕ версии
+            // (в т.ч. с breaking changes в pandas/numpy API, которые использует build_report.py),
+            // и пересборка через несколько месяцев без единой правки кода могла тихо подтянуть
+            // другую мажорную версию и сломать отчёт. Версии ниже - единственные, для которых на
+            // момент этой правки в репозитории Chaquopy есть колёса под cp313 (Python 3.13,
+            // см. version выше) - при обновлении version/buildPython нужно заново свериться со
+            // страницами https://chaquo.com/pypi-13.1/<пакет>/ и поднять пины осознанно, а не
+            // молча ловить несовместимость на следующей сборке.
+            install("numpy==1.26.2")
+            install("pandas==2.1.3")
+            install("matplotlib==3.8.4")
         }
     }
 }

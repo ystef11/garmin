@@ -144,7 +144,7 @@ fun SecurityScreen(authViewModel: AuthViewModel, homeViewModel: HomeViewModel, o
     if (showChangePin) {
         ChangePinDialog(
             onDismiss = { showChangePin = false },
-            onSubmit = { old, new -> authViewModel.changePin(old, new) },
+            onSubmit = { old, new -> authViewModel.changePin(old, new) }, // suspend-лямбда (см. п.15 ревью)
             onDone = { showChangePin = false }
         )
     }
@@ -153,11 +153,12 @@ fun SecurityScreen(authViewModel: AuthViewModel, homeViewModel: HomeViewModel, o
         UpdateAvailableDialog(
             latestVersion = update.latestVersion,
             apkUrl = update.apkUrl,
+            expectedSha256 = update.sha256,
             onDismiss = { foundUpdate = null },
             // Пропуск версии из ручной проверки ведёт себя так же, как из диалога на старте —
             // сохраняется на диск, чтобы при следующем автозапуске это обновление снова не всплывало.
             onSkip = {
-                homeViewModel.skipVersion(update.latestVersion)
+                homeViewModel.skipVersion(update.skipKey)
                 foundUpdate = null
             }
         )
@@ -167,13 +168,15 @@ fun SecurityScreen(authViewModel: AuthViewModel, homeViewModel: HomeViewModel, o
 @Composable
 private fun ChangePinDialog(
     onDismiss: () -> Unit,
-    onSubmit: (old: String, new: String) -> Boolean,
+    onSubmit: suspend (old: String, new: String) -> Boolean,
     onDone: () -> Unit
 ) {
     var oldPin by remember { mutableStateOf("") }
     var newPin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val numeric = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
 
     AlertDialog(
@@ -208,14 +211,26 @@ private fun ChangePinDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                when {
-                    newPin.length != 4 -> error = "Новый ПИН должен состоять из 4 цифр"
-                    newPin != confirmPin -> error = "Новый ПИН и повтор не совпадают"
-                    !onSubmit(oldPin, newPin) -> error = "Текущий ПИН неверен"
-                    else -> onDone()
+            // ИСПРАВЛЕНО (ревью п.15): onSubmit теперь suspend (PBKDF2 внутри AuthViewModel.
+            // changePin ушёл на Dispatchers.Default, см. её же правку) - вызываем через
+            // rememberCoroutineScope().launch{} вместо прямого вызова в onClick.
+            TextButton(
+                enabled = !checking,
+                onClick = {
+                    when {
+                        newPin.length != 4 -> error = "Новый ПИН должен состоять из 4 цифр"
+                        newPin != confirmPin -> error = "Новый ПИН и повтор не совпадают"
+                        else -> {
+                            checking = true
+                            scope.launch {
+                                val ok = onSubmit(oldPin, newPin)
+                                checking = false
+                                if (ok) onDone() else error = "Текущий ПИН неверен"
+                            }
+                        }
+                    }
                 }
-            }) { Text("Сохранить") }
+            ) { Text(if (checking) "Проверка…" else "Сохранить") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }
     )

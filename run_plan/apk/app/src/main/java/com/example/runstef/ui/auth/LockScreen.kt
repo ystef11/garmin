@@ -26,6 +26,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +37,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.example.runstef.security.BiometricAuth
+import kotlinx.coroutines.launch
 
 private const val PIN_LENGTH = 4
 
@@ -61,7 +63,7 @@ fun LockScreen(activity: FragmentActivity, authViewModel: AuthViewModel) {
         PinUnlockContent(
             activity = activity,
             showBiometric = biometricAvailable && biometricEnabled,
-            onVerify = { pin -> authViewModel.tryUnlockWithPin(pin) },
+            onVerify = { pin -> authViewModel.tryUnlockWithPin(pin) }, // suspend-лямбда (см. п.15 ревью)
             onLockoutSecondsRemaining = { authViewModel.lockoutSecondsRemaining() },
             onBiometricSuccess = { authViewModel.unlockWithBiometric() }
         )
@@ -128,12 +130,13 @@ private fun PinSetupContent(onPinSet: (String) -> Unit) {
 private fun PinUnlockContent(
     activity: FragmentActivity,
     showBiometric: Boolean,
-    onVerify: (String) -> Boolean,
+    onVerify: suspend (String) -> Boolean,
     onLockoutSecondsRemaining: () -> Long = { 0L },
     onBiometricSuccess: () -> Unit
 ) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     fun triggerBiometric() {
         BiometricAuth.prompt(
@@ -186,16 +189,21 @@ private fun PinUnlockContent(
                     val next = pin + digit
                     pin = next
                     if (next.length == PIN_LENGTH) {
-                        if (onVerify(next)) {
-                            error = null
-                        } else {
-                            val lockoutSecs = onLockoutSecondsRemaining()
-                            error = if (lockoutSecs > 0) {
-                                "Слишком много попыток. Попробуйте снова через $lockoutSecs с"
+                        // PBKDF2-проверка ПИН (см. AuthViewModel.tryUnlockWithPin) теперь suspend
+                        // и уходит на Dispatchers.Default - здесь просто запускаем корутину,
+                        // ввод следующих цифр по-прежнему блокируется length==PIN_LENGTH до ответа.
+                        scope.launch {
+                            if (onVerify(next)) {
+                                error = null
                             } else {
-                                "Неверный ПИН-код"
+                                val lockoutSecs = onLockoutSecondsRemaining()
+                                error = if (lockoutSecs > 0) {
+                                    "Слишком много попыток. Попробуйте снова через $lockoutSecs с"
+                                } else {
+                                    "Неверный ПИН-код"
+                                }
+                                pin = ""
                             }
-                            pin = ""
                         }
                     }
                 }

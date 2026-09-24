@@ -33,6 +33,19 @@ import kotlin.math.abs
  * Использует тот же GarminAuth.connectApi (Bearer OAuth2), что и GarminApi (загрузка плана) —
  * один и тот же сохранённый токен/аккаунт обслуживает обе вкладки.
  */
+/**
+ * Правка 2026-09-24 (ревью п.6 "Одно пустое поле от Garmin обрывает весь импорт"): в
+ * kotlinx.serialization `obj["x"]` для `"x": null` возвращает JsonNull (а не Kotlin-null) - это
+ * НЕ JsonObject/JsonArray, поэтому обычный `.obj()`/`.arr()` на таком значении не
+ * тихо даёт null, а бросает IllegalArgumentException ("Element class
+ * kotlinx.serialization.json.JsonNull is not a JsonObject"). Эти хелперы вместо расширений
+ * `.jsonObject`/`.jsonArray` возвращают null для ЛЮБОГО значения не того типа (включая
+ * JsonNull), не бросая исключение - используются везде в этом файле вместо `.obj()`/
+ * `.arr()`.
+ */
+private fun JsonElement?.obj(): JsonObject? = this as? JsonObject
+private fun JsonElement?.arr(): JsonArray? = this as? JsonArray
+
 class GarminActivitiesApi(
     private val auth: GarminAuth,
     private val log: (String) -> Unit = {}
@@ -51,6 +64,10 @@ class GarminActivitiesApi(
         private val OUTDOOR_RUN_TYPE_KEYS = RUN_TYPE_KEYS - setOf(
             "treadmill_running", "indoor_running", "virtual_run"
         )
+        // Порт п.13 ревью — типы, для которых температура с датчика часов (directAirTemperature/
+        // directTemperature из посекундного потока /details) не запрашивается: в помещении/на
+        // дорожке нет физического смысла в "уличной" температуре, это лишний сетевой запрос.
+        private val INDOOR_RUN_TYPE_KEYS = setOf("treadmill_running", "indoor_running")
         private val GRADE_ADJUSTED_SPEED_KEY_CANDIDATES = listOf("directGradeAdjustedSpeed", "gradeAdjustedSpeed")
         private val GRADE_ADJUSTED_DISTANCE_KEY_CANDIDATES = listOf("sumDistance")
 
@@ -266,7 +283,7 @@ class GarminActivitiesApi(
         val startLocal = act["startTimeLocal"]?.jsonPrimitive?.contentOrNull ?: return null
         val date = startLocal.split(" ").firstOrNull() ?: return null
         val name = act["activityName"]?.jsonPrimitive?.contentOrNull ?: ""
-        val sportKey = act["activityType"]?.jsonObject?.get("typeKey")?.jsonPrimitive?.contentOrNull
+        val sportKey = act["activityType"].obj()?.get("typeKey")?.jsonPrimitive?.contentOrNull
         if (sportKey == null || sportKey.lowercase() !in RUN_TYPE_KEYS) return null
         val duration = act["duration"]?.jsonPrimitive?.doubleOrNull
         val distance = act["distance"]?.jsonPrimitive?.doubleOrNull
@@ -327,7 +344,7 @@ class GarminActivitiesApi(
         val activityId = act["activityId"]?.jsonPrimitive?.longOrNull ?: return null
         val startLocal = act["startTimeLocal"]?.jsonPrimitive?.contentOrNull ?: return null
         val date = startLocal.split(" ").firstOrNull() ?: return null
-        val sportKey = act["activityType"]?.jsonObject?.get("typeKey")?.jsonPrimitive?.contentOrNull
+        val sportKey = act["activityType"].obj()?.get("typeKey")?.jsonPrimitive?.contentOrNull
         val group = crossGroup(sportKey) ?: return null
         val name = act["activityName"]?.jsonPrimitive?.contentOrNull ?: ""
         val duration = act["duration"]?.jsonPrimitive?.doubleOrNull
@@ -389,11 +406,11 @@ class GarminActivitiesApi(
     private fun fetchSleepDay(tokens: GarminTokens, username: String, date: String): Map<String, Any?> {
         val data = safeGetJsonObject(tokens, "/wellness-service/wellness/dailySleepData/$username?date=$date&nonSleepBufferMinutes=60")
             ?: return emptyMap()
-        val dto = data["dailySleepDTO"]?.jsonObject ?: return emptyMap()
+        val dto = data["dailySleepDTO"].obj() ?: return emptyMap()
         val sleepTimeS = dto["sleepTimeSeconds"]?.jsonPrimitive?.doubleOrNull
         if (sleepTimeS == null || sleepTimeS == 0.0) return emptyMap()
-        val overall = dto["sleepScores"]?.jsonObject?.get("overall")?.jsonObject
-        val sleepNeed = dto["sleepNeed"]?.jsonObject
+        val overall = dto["sleepScores"].obj()?.get("overall").obj()
+        val sleepNeed = dto["sleepNeed"].obj()
         return mapOf(
             "sleep_score" to overall?.get("value")?.jsonPrimitive?.intOrNull,
             "sleep_duration_s" to sleepTimeS,
@@ -465,7 +482,7 @@ class GarminActivitiesApi(
             val text = bodyOf(resp)
             val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() ?: return emptyMap()
             val row = when {
-                root is kotlinx.serialization.json.JsonArray -> root.firstOrNull()?.jsonObject
+                root is kotlinx.serialization.json.JsonArray -> root.firstOrNull().obj()
                 root is JsonObject -> root
                 else -> null
             } ?: return emptyMap()
@@ -501,7 +518,7 @@ class GarminActivitiesApi(
                     arr?.forEach { el ->
                         val row = el.jsonObject
                         val d = (row["date"] ?: row["calendarDate"])?.jsonPrimitive?.contentOrNull ?: return@forEach
-                        val values = row["bodyBatteryValuesArray"]?.jsonArray?.mapNotNull { pair ->
+                        val values = row["bodyBatteryValuesArray"].arr()?.mapNotNull { pair ->
                             val p = pair.jsonArray
                             if (p.size > 1) p[1].jsonPrimitive.doubleOrNull else null
                         } ?: emptyList()
@@ -819,22 +836,34 @@ class GarminActivitiesApi(
 
     private val DEVICE_TEMPERATURE_KEY_CANDIDATES = listOf("directAirTemperature", "directTemperature")
 
-    /** Порт fetch_device_temperature() из garmin_activities_export.py (~2069-2107): средняя
-     * температура с датчика часов (посекундный поток /details, отдельный от avg_temperature_c
-     * в EF-конфаундах, который берётся из сводки min/maxTemperature активности). Best-effort:
-     * эндпоинт недоступен/дескриптора нет/точки пустые -> null, не падает. */
-    fun fetchDeviceTemperature(tokens: GarminTokens, activityId: Long, maxChartSize: Int = 2000): Double? {
-        val details = try {
+    // ИСПРАВЛЕНО (ревью п.13 "Лишние сетевые запросы при импорте"): раньше fetchDeviceTemperature
+    // и fetchGradeAdjustedPaceByLap каждая сама по себе ходили в один и тот же поточный
+    // эндпоинт /activity-service/activity/{id}/details - на активность с заметным набором
+    // высоты это был ДВОЙНОЙ запрос одного и того же (обычно самого тяжёлого - посекундного)
+    // ответа. Теперь поток запрашивается один раз через fetchDetailStream(), а обе функции
+    // (переименованы в parseDeviceTemperature/parseGradeAdjustedPaceByLap) только парсят уже
+    // готовый JsonObject - сетевой поход остался только в fetchDetailStream().
+    private fun fetchDetailStream(tokens: GarminTokens, activityId: Long, maxChartSize: Int = 2000): JsonObject? {
+        return try {
             val resp = auth.connectApi(
                 tokens,
                 "/activity-service/activity/$activityId/details?maxChartSize=$maxChartSize&maxPolylineSize=$maxChartSize"
             )
             val text = bodyOf(resp)
             if (!resp.isSuccessful) return null
-            runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
+            runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()
         } catch (e: Exception) {
-            return null
+            null
         }
+    }
+
+    /** Порт fetch_device_temperature() из garmin_activities_export.py (~2069-2107): средняя
+     * температура с датчика часов (посекундный поток /details, отдельный от avg_temperature_c
+     * в EF-конфаундах, который берётся из сводки min/maxTemperature активности). Best-effort:
+     * дескриптора нет/точки пустые -> null, не падает. Принимает уже загруженный поток (см.
+     * fetchDetailStream выше) - сам сеть больше не трогает. */
+    fun parseDeviceTemperature(details: JsonObject?): Double? {
+        if (details == null) return null
         val descriptors = details["metricDescriptors"]?.let { runCatching { it.jsonArray }.getOrNull() } ?: return null
         var idxTemp: Int? = null
         for (key in DEVICE_TEMPERATURE_KEY_CANDIDATES) {
@@ -880,23 +909,11 @@ class GarminActivitiesApi(
      * Возвращает (overallSPerKm, lapIdx -> sPerKm) — идексация та же, что в [laps] (порядковая,
      * см. [IntervalRow.idx] из [fetchLaps]).
      */
-    fun fetchGradeAdjustedPaceByLap(
-        tokens: GarminTokens,
-        activityId: Long,
-        laps: List<IntervalRow>,
-        maxChartSize: Int = 2000
+    fun parseGradeAdjustedPaceByLap(
+        details: JsonObject?,
+        laps: List<IntervalRow>
     ): Pair<Double?, Map<Int, Double>> {
-        val details = try {
-            val resp = auth.connectApi(
-                tokens,
-                "/activity-service/activity/$activityId/details?maxChartSize=$maxChartSize&maxPolylineSize=$maxChartSize"
-            )
-            val text = bodyOf(resp)
-            if (!resp.isSuccessful) return null to emptyMap()
-            runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null to emptyMap()
-        } catch (e: Exception) {
-            return null to emptyMap()
-        }
+        if (details == null) return null to emptyMap()
 
         val descriptors = details["metricDescriptors"]?.let { runCatching { it.jsonArray }.getOrNull() } ?: return null to emptyMap()
 
@@ -1045,16 +1062,35 @@ class GarminActivitiesApi(
     ): ImportResult {
         log("Период: $startDate .. $endDate")
         val rawAll = fetchAllActivities(tokens, startDate.toString(), endDate.toString())
-        val rows = rawAll.mapNotNull { toActivityRow(it) }
-        val crossRows = rawAll.mapNotNull { toCrossActivityRow(it) }
+        // ИСПРАВЛЕНО (ревью п.6): раньше toActivityRow/toCrossActivityRow вызывались без try —
+        // одна активность с неожиданным полем (например activityType: null, см. .obj()/.arr()
+        // выше) бросала исключение прямо внутри mapNotNull и обрывала разбор ВСЕХ активностей
+        // периода, а не только проблемной. runCatching изолирует каждую активность отдельно.
+        val rows = rawAll.mapNotNull { act ->
+            runCatching { toActivityRow(act) }
+                .onFailure { log("Пропущена активность ${act["activityId"]?.jsonPrimitive?.contentOrNull} (ошибка разбора: ${it.message})") }
+                .getOrNull()
+        }
+        val crossRows = rawAll.mapNotNull { act ->
+            runCatching { toCrossActivityRow(act) }
+                .onFailure { log("Пропущена кросс-активность ${act["activityId"]?.jsonPrimitive?.contentOrNull} (ошибка разбора: ${it.message})") }
+                .getOrNull()
+        }
         val rawById = rawAll.mapNotNull { act -> act["activityId"]?.jsonPrimitive?.longOrNull?.let { it to act } }.toMap()
         log("Найдено беговых активностей: ${rows.size}, кросс-тренировок: ${crossRows.size}")
 
         // Грубая оценка restHr/maxHr периода — фолбэк для classify(), когда лапы вообще не
         // пришли, и для estimateHrZones (приближённый Карвонен), если настоящего ПАНО в БД нет.
+        // ИСПРАВЛЕНО (ревью п.11 "Неверный пульс покоя при первом импорте"): раньше при
+        // отсутствии данных самочувствия (db.recentRestingHr == null, обычно при самом первом
+        // импорте) за restHr брался минимальный СРЕДНИЙ пульс пробежек (restHrObs) - у бегуна
+        // это ~120-130 уд/мин, а не настоящий пульс покоя (~50-65). С таким завышенным restHr
+        // зоны Карвонена (estimateHrZones) сдвигались вверх, и интервальные/пороговые
+        // тренировки ошибочно классифицировались как лёгкие или смешанные (classify() выше).
+        // Теперь вместо restHrObs используется консервативная константа 55 уд/мин - ближе к
+        // типичному пульсу покоя бегуна-любителя, чем минимальный пульс во время бега.
         val maxHrObs = rows.mapNotNull { it.maxHr }.maxOrNull()
-        val restHrObs = rows.mapNotNull { it.avgHr }.minOrNull()
-        val restHr = db.recentRestingHr(startDate.minusDays(90).toString()) ?: restHrObs
+        val restHr = db.recentRestingHr(startDate.minusDays(90).toString()) ?: 55
 
         val exportedAt = OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
 
@@ -1081,6 +1117,12 @@ class GarminActivitiesApi(
         var progressDone = 0
         for (r in rows) {
             if (isCancelled()) throw ImportCancelledException()
+            // ИСПРАВЛЕНО (ревью п.6): весь разбор/дозагрузка одной активности (лапы, detail,
+            // GAP, температура, классификация, запись в БД) теперь в try - раньше исключение в
+            // любом из этих шагов для ОДНОЙ активности (например неожиданный формат ответа
+            // Garmin) обрывало импорт всех оставшихся активностей периода; прогресс/задержка
+            // ниже выполняются в любом случае, чтобы процент и троттлинг запросов не сбивались.
+            try {
             // Лапы — как в garmin_activities_export.py: тянем ПО КАЖДОЙ активности отдельным
             // запросом (typedsplits → splits), поэтому классификация точнее грубой эвристики
             // (classifyByLaps умеет отличать интервалы/порог/длинную/лёгкую по структуре
@@ -1098,41 +1140,52 @@ class GarminActivitiesApi(
             val confoundSource = act?.let { mergeActivityDetail(it, detail) }
             val confounds = confoundSource?.let { extractEfConfounds(it) }
 
-            // GAP (grade-adjusted pace) — только для уличных беговых типов с заметным набором
-            // высоты (порт условия из garmin_activities_export.py: OUTDOOR_RUN_TYPE_KEYS и
-            // elevation_gain_m >= 30 м) — лишний поточный запрос на каждую активность иначе
-            // тратился бы зря на дорожке/ровных пробежках.
+            // ИСПРАВЛЕНО (ревью п.13 "Лишние сетевые запросы при импорте"): GAP и температура
+            // с датчика часов раньше каждая сама ходила в /details (fetchGradeAdjustedPaceByLap
+            // и fetchDeviceTemperature) - на активность, которой нужны оба значения, это был
+            // двойной запрос одного и того же посекундного потока. Теперь поток запрашивается
+            // максимум один раз (fetchDetailStream) и передаётся в обе parse-функции. Также
+            // температуру больше не запрашиваем безусловно: на дорожке/в помещении датчика
+            // "уличной" температуры на часах физически нет (проверено вручную на нескольких
+            // treadmill/indoor активностях — directAirTemperature/directTemperature там либо
+            // отсутствуют, либо не имеют смысла) — это тоже был лишний запрос.
             var avgGap: Double? = null
             val elevationGainM = confounds?.elevationGainM
-            if (laps.isNotEmpty() && r.sport?.lowercase() in OUTDOOR_RUN_TYPE_KEYS &&
+            val sportLower = r.sport?.lowercase()
+            val needGap = laps.isNotEmpty() && sportLower in OUTDOOR_RUN_TYPE_KEYS &&
                 elevationGainM != null && elevationGainM >= 30.0
-            ) {
-                val (overall, perLap) = fetchGradeAdjustedPaceByLap(tokens, r.activityId, laps)
-                if (overall != null) {
-                    avgGap = overall
-                    laps = laps.map { l -> l.copy(avgGapSPerKm = perLap[l.idx]) }
-                    gapFetched++
+            val needTemperature = sportLower !in INDOOR_RUN_TYPE_KEYS
+            var avgDeviceTemperatureC: Double? = null
+            if (needGap || needTemperature) {
+                val detailStream = fetchDetailStream(tokens, r.activityId)
+                if (needGap) {
+                    val (overall, perLap) = parseGradeAdjustedPaceByLap(detailStream, laps)
+                    if (overall != null) {
+                        avgGap = overall
+                        laps = laps.map { l -> l.copy(avgGapSPerKm = perLap[l.idx]) }
+                        gapFetched++
+                    }
+                }
+                if (needTemperature) {
+                    avgDeviceTemperatureC = parseDeviceTemperature(detailStream)
                 }
             }
 
-            // Температура с датчика часов — отдельный поточный запрос /details (порт
-            // fetch_device_temperature(), garmin_activities_export.py:2069-2107), как и в
-            // десктопе, безусловно для каждой активности (не гейтится уклоном/типом трассы).
-            val avgDeviceTemperatureC = fetchDeviceTemperature(tokens, r.activityId)
-
-            if (laps.isNotEmpty()) {
-                db.replaceIntervals(r.activityId, laps)
-                lapsFetched++
-            }
-            val byLaps = if (laps.isNotEmpty()) classifyByLaps(r.durationS ?: 0.0, laps, hrZones) else "unknown"
-            // Порт reclassify_activities()/classify(): "unknown" сохраняется КАК ЕСТЬ, если
-            // лапов с ненулевой длительностью нет вообще — у десктопа нет отдельного грубого
-            // фолбэк-классификатора по среднему пульсу тренировки, только эта одна функция.
-            val typeGuess = byLaps
+            if (laps.isNotEmpty()) lapsFetched++
+            // ИСПРАВЛЕНО (ревью п.7): раньше при пустых лапах (в т.ч. из-за СЕТЕВОЙ ошибки/401
+            // в ЭТОМ прогоне, не обязательно потому что лапов правда нет) typeGuess безусловно
+            // становился "unknown" и lapSource - "none"/фактическим значением fetchLaps, и это
+            // писалось поверх уже сохранённой хорошей классификации. Теперь при отсутствии
+            // лапов В ЭТОМ прогоне пишем null вместо "unknown"/значения по умолчанию -
+            // upsertCoalesce (см. AnalyticsDb) тогда оставит прежнее значение колонки как есть,
+            // а не затрёт его. Для АКТИВНОСТИ, у которой лапов реально никогда не было (первый
+            // импорт), это просто оставляет колонку NULL - как и раньше.
+            val typeGuess: String? = if (laps.isNotEmpty()) classifyByLaps(r.durationS ?: 0.0, laps, hrZones) else null
+            val effectiveLapSource: String? = if (laps.isNotEmpty()) lapSource else null
             val drift = if (laps.isNotEmpty()) computeLapDrift(laps) else null
-            db.upsertActivity(
+            db.upsertActivityWithLaps(
                 r.copy(
-                    lapSource = lapSource,
+                    lapSource = effectiveLapSource,
                     typeGuess = typeGuess,
                     elevationGainM = confounds?.elevationGainM ?: r.elevationGainM,
                     elevationLossM = confounds?.elevationLossM ?: r.elevationLossM,
@@ -1161,8 +1214,14 @@ class GarminActivitiesApi(
                     gctDriftPct = drift?.gctDriftPct,
                     verticalOscDriftPct = drift?.verticalOscDriftPct
                 ),
+                laps,
                 exportedAt
             )
+            } catch (e: ImportCancelledException) {
+                throw e
+            } catch (e: Exception) {
+                log("Пропущена активность ${r.activityId} (${r.name ?: ""}) при дозагрузке деталей: ${e.message}")
+            }
             progressDone++
             onProgress(progressDone, progressTotal)
             if (lapsDelayMs > 0) Thread.sleep(lapsDelayMs)
@@ -1195,9 +1254,13 @@ class GarminActivitiesApi(
                     if (isCancelled()) throw ImportCancelledException()
                     val dateStr = d.toString()
                     if (dateStr !in already) {
+                      // ИСПРАВЛЕНО (ревью п.6): разбор одного дня самочувствия — в try, чтобы
+                      // один день с неожиданным полем (например день сна без sleepNeed) не
+                      // обрывал догрузку самочувствия за весь остальной период.
+                      try {
                         val sleep = fetchSleepDay(tokens, username, dateStr)
                         val hrv = fetchHrv(tokens, dateStr)
-                        val hrvSummary = hrv?.get("hrvSummary")?.jsonObject
+                        val hrvSummary = hrv?.get("hrvSummary").obj()
                         val daily = fetchDailySummary(tokens, username, dateStr)
                         val dailyFields = dailySummaryWellnessFields(daily)
                         val stress = fetchStressDay(tokens, dateStr)
@@ -1254,6 +1317,11 @@ class GarminActivitiesApi(
                             wellnessDays++
                         }
                         if (wellnessDelayMs > 0) Thread.sleep(wellnessDelayMs)
+                      } catch (e: ImportCancelledException) {
+                          throw e
+                      } catch (e: Exception) {
+                          log("Пропущено самочувствие за $dateStr: ${e.message}")
+                      }
                     }
                     progressDone++
                     onProgress(progressDone, progressTotal)

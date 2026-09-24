@@ -6,7 +6,7 @@ package com.example.runstef.data
  */
 object VersionCompare {
 
-    /** true, если [remoteVersion] строго новее [currentVersion]. */
+    /** true, если [remoteVersion] строго новее [currentVersion] (сравнение строк вида "0.0.1" - см. doc класса). */
     fun isNewer(remoteVersion: String, currentVersion: String): Boolean {
         val remote = parts(remoteVersion)
         val current = parts(currentVersion)

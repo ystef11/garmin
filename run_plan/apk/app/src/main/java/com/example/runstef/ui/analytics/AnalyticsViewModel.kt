@@ -11,7 +11,10 @@ import com.example.runstef.network.garmin.GarminTokenStore
 import com.example.runstef.service.AnalyticsImportBus
 import com.example.runstef.service.AnalyticsImportService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -44,7 +47,14 @@ class AnalyticsViewModel(application: Application) : AndroidViewModel(applicatio
     private val settings = SettingsStore(app)
 
     val log: StateFlow<List<String>> = AnalyticsImportBus.log
-    val isRunning: StateFlow<Boolean> = AnalyticsImportBus.isRunning
+    /** Идёт операция аналитики (импорт/автообновление/отчёт/импорт-экспорт БД) — показываем «Стоп». */
+    val isRunning: StateFlow<Boolean> = AnalyticsImportBus.operation
+        .map { it == AnalyticsImportBus.Operation.ANALYTICS }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AnalyticsImportBus.operation.value == AnalyticsImportBus.Operation.ANALYTICS)
+    /** Сейчас идёт экспорт плана — кнопки аналитики недоступны, но «Стоп» здесь не показываем. */
+    val busyOther: StateFlow<Boolean> = AnalyticsImportBus.operation
+        .map { it == AnalyticsImportBus.Operation.EXPORT }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AnalyticsImportBus.operation.value == AnalyticsImportBus.Operation.EXPORT)
     /** Процент выполнения текущего импорта (0..100) - null, пока процент неизвестен (сборка
      * отчёта, самое начало импорта) или ничего не выполняется; тогда UI показывает обычный
      * неопределённый троббер вместо числа. */
@@ -113,11 +123,10 @@ class AnalyticsViewModel(application: Application) : AndroidViewModel(applicatio
         // прошло без ошибок. Также блокируем операцию, пока идёт другой импорт/сборка отчёта
         // (см. AnalyticsImportBus.isRunning -- иначе можно подменить базу прямо во время её
         // чтения сервисом).
-        if (AnalyticsImportBus.isRunning.value) {
-            AnalyticsImportBus.appendLog("Уже выполняется другая операция аналитики - подождите её завершения.")
+        if (!AnalyticsImportBus.tryStart()) {
+            AnalyticsImportBus.logBusy(AnalyticsImportBus.Operation.ANALYTICS)
             return
         }
-        AnalyticsImportBus.setRunning(true)
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
@@ -148,22 +157,24 @@ class AnalyticsViewModel(application: Application) : AndroidViewModel(applicatio
                             }
                         }
 
-                        // Если во временном файле уже есть таблица activities (обычный случай
-                        // для десктопной базы или экспорта с другого устройства), но
-                        // user_version не проставлен как у apk -- считаем схему уже актуальной
-                        // (см. project memory: "с v6 схема ПОЛНОСТЬЮ приведена к десктопной") и
-                        // просто выставляем правильный user_version, чтобы SQLiteOpenHelper НЕ
-                        // вызывал onCreate/onUpgrade поверх существующих таблиц. Если таблиц нет
-                        // (пустой/новый файл) -- оставляем как есть, onCreate отработает как
-                        // обычно.
                         val raw = android.database.sqlite.SQLiteDatabase.openDatabase(
                             tempFile.path, null, android.database.sqlite.SQLiteDatabase.OPEN_READWRITE
                         )
                         try {
-                            val hasActivitiesTable = raw.rawQuery(
-                                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='activities'", null
-                            ).use { it.moveToFirst() }
-                            if (hasActivitiesTable && raw.version < AnalyticsDb.DB_VERSION) {
+                            // Приводим схему файла к текущей: недостающие таблицы создаются,
+                            // недостающие колонки добавляются (ALTER TABLE ADD COLUMN), и только
+                            // после этого ставим актуальный user_version — иначе SQLiteOpenHelper
+                            // при user_version=0 вызвал бы onCreate поверх существующих таблиц.
+                            // Несовместимый файл (нет ключевых колонок) — исключение, рабочая
+                            // база не тронута.
+                            // Только для файлов без user_version (десктопный экспортёр его не ставит).
+                            // База старой версии самого apk (user_version 1..6) идёт через обычный
+                            // onUpgrade — там есть перенос данных (например resting_hr -> rhr).
+                            if (raw.version == 0) {
+                                val changes = AnalyticsDb.repairImportedSchema(raw)
+                                if (changes.isNotEmpty()) {
+                                    AnalyticsImportBus.appendLog("Схема импортируемой базы дополнена: ${changes.joinToString(", ")}")
+                                }
                                 raw.version = AnalyticsDb.DB_VERSION
                             }
                         } finally {
@@ -200,7 +211,7 @@ class AnalyticsViewModel(application: Application) : AndroidViewModel(applicatio
             } catch (e: Exception) {
                 AnalyticsImportBus.appendLog("Ошибка импорта базы: ${e.message} (рабочая база аккаунта не изменена)")
             } finally {
-                AnalyticsImportBus.setRunning(false)
+                AnalyticsImportBus.finish()
             }
         }
     }
@@ -218,11 +229,10 @@ class AnalyticsViewModel(application: Application) : AndroidViewModel(applicatio
             AnalyticsImportBus.appendLog("Не выбран аккаунт - экспорт базы отменён.")
             return
         }
-        if (AnalyticsImportBus.isRunning.value) {
-            AnalyticsImportBus.appendLog("Уже выполняется другая операция аналитики - подождите её завершения.")
+        if (!AnalyticsImportBus.tryStart()) {
+            AnalyticsImportBus.logBusy(AnalyticsImportBus.Operation.ANALYTICS)
             return
         }
-        AnalyticsImportBus.setRunning(true)
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
@@ -240,7 +250,7 @@ class AnalyticsViewModel(application: Application) : AndroidViewModel(applicatio
             } catch (e: Exception) {
                 AnalyticsImportBus.appendLog("Ошибка экспорта базы: ${e.message}")
             } finally {
-                AnalyticsImportBus.setRunning(false)
+                AnalyticsImportBus.finish()
             }
         }
     }
@@ -253,7 +263,6 @@ class AnalyticsViewModel(application: Application) : AndroidViewModel(applicatio
         withWellness: Boolean,
         forceRefreshWellness: Boolean
     ) {
-        if (AnalyticsImportBus.isRunning.value) return
         val intent = Intent(app, AnalyticsImportService::class.java).apply {
             action = AnalyticsImportService.ACTION_IMPORT
             putExtra(AnalyticsImportService.EXTRA_ACCOUNT, account)
@@ -262,31 +271,53 @@ class AnalyticsViewModel(application: Application) : AndroidViewModel(applicatio
             putExtra(AnalyticsImportService.EXTRA_WITH_WELLNESS, withWellness)
             putExtra(AnalyticsImportService.EXTRA_FORCE_REFRESH, forceRefreshWellness)
         }
-        ContextCompat.startForegroundService(app, intent)
+        if (!AnalyticsImportBus.tryStart(AnalyticsImportBus.Operation.ANALYTICS)) {
+            AnalyticsImportBus.logBusy(AnalyticsImportBus.Operation.ANALYTICS)
+            return
+        }
+        try {
+            ContextCompat.startForegroundService(app, intent)
+        } catch (e: Exception) {
+            AnalyticsImportBus.finish()
+            AnalyticsImportBus.appendLog("Не удалось запустить фоновую задачу: ${e.message}")
+        }
     }
 
     /** Тихое авто-обновление при открытии вкладки — только если для аккаунта уже есть непустая
      * база (см. AnalyticsScreen: если базы ещё нет, ждём ручной первой загрузки с явным периодом).
-     * Быстрая проверка (есть ли уже данные, актуален ли диапазон) делается тут же синхронно —
-     * сама сетевая догрузка идёт через foreground-сервис (см. class doc выше). */
+     * Быстрая проверка (есть ли уже данные, актуален ли диапазон) раньше делалась тут же
+     * синхронно, на главном потоке (ИСПРАВЛЕНО, ревью п.15 "Main-thread blocking work") —
+     * AnalyticsDb.open()/lastActivityDate() это открытие SQLite-файла и SQL-запрос, файловый
+     * I/O. Теперь сама проверка ушла на Dispatchers.IO, а старт foreground-сервиса — обратно на
+     * главный поток (ContextCompat.startForegroundService этого требует). Сама сетевая догрузка
+     * по-прежнему идёт через foreground-сервис (см. class doc выше). */
     fun autoCatchUp(account: String) {
         if (AnalyticsImportBus.isRunning.value || account.isBlank()) return
         if (!autoCatchUpDoneForAccount.add(account)) return
-        val db = AnalyticsDb.open(app, account)
-        val last = db.lastActivityDate()
-        db.close()
-        if (last == null) return
-        val lastDate = runCatching { LocalDate.parse(last) }.getOrNull() ?: return
-        val start = lastDate.minusDays(2)
-        val end = LocalDate.now()
-        if (start.isAfter(end)) return
-        val intent = Intent(app, AnalyticsImportService::class.java).apply {
-            action = AnalyticsImportService.ACTION_AUTO_CATCH_UP
-            putExtra(AnalyticsImportService.EXTRA_ACCOUNT, account)
-            putExtra(AnalyticsImportService.EXTRA_START, start.toString())
-            putExtra(AnalyticsImportService.EXTRA_END, end.toString())
+        viewModelScope.launch {
+            val last = withContext(Dispatchers.IO) {
+                val db = AnalyticsDb.open(app, account)
+                try { db.lastActivityDate() } finally { db.close() }
+            }
+            if (last == null) return@launch
+            val lastDate = runCatching { LocalDate.parse(last) }.getOrNull() ?: return@launch
+            val start = lastDate.minusDays(2)
+            val end = LocalDate.now()
+            if (start.isAfter(end)) return@launch
+            val intent = Intent(app, AnalyticsImportService::class.java).apply {
+                action = AnalyticsImportService.ACTION_AUTO_CATCH_UP
+                putExtra(AnalyticsImportService.EXTRA_ACCOUNT, account)
+                putExtra(AnalyticsImportService.EXTRA_START, start.toString())
+                putExtra(AnalyticsImportService.EXTRA_END, end.toString())
+            }
+            // Автообновление тихое: если занято — просто не запускаем.
+            if (!AnalyticsImportBus.tryStart(AnalyticsImportBus.Operation.ANALYTICS)) return@launch
+            try {
+                ContextCompat.startForegroundService(app, intent)
+            } catch (e: Exception) {
+                AnalyticsImportBus.finish()
+            }
         }
-        ContextCompat.startForegroundService(app, intent)
     }
 
     /** Запускает foreground-сервис на сборку HTML-отчёта (см. class doc выше). */
@@ -295,7 +326,16 @@ class AnalyticsViewModel(application: Application) : AndroidViewModel(applicatio
             action = AnalyticsImportService.ACTION_BUILD_REPORT
             putExtra(AnalyticsImportService.EXTRA_ACCOUNT, account)
         }
-        ContextCompat.startForegroundService(app, intent)
+        if (!AnalyticsImportBus.tryStart(AnalyticsImportBus.Operation.ANALYTICS)) {
+            AnalyticsImportBus.logBusy(AnalyticsImportBus.Operation.ANALYTICS)
+            return
+        }
+        try {
+            ContextCompat.startForegroundService(app, intent)
+        } catch (e: Exception) {
+            AnalyticsImportBus.finish()
+            AnalyticsImportBus.appendLog("Не удалось запустить фоновую задачу: ${e.message}")
+        }
     }
 
     fun consumeReportPath() { AnalyticsImportBus.setReportPath(null) }

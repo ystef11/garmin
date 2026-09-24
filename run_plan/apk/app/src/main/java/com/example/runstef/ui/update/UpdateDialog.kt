@@ -54,7 +54,8 @@ fun UpdateAvailableDialog(
     latestVersion: String,
     apkUrl: String,
     onDismiss: () -> Unit,
-    onSkip: () -> Unit
+    onSkip: () -> Unit,
+    expectedSha256: String? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -78,8 +79,13 @@ fun UpdateAvailableDialog(
         state = DownloadState.Downloading
         scope.launch {
             try {
-                val file = withContext(Dispatchers.IO) { ApkUpdater.downloadApk(context, apkUrl) }
+                val file = withContext(Dispatchers.IO) { ApkUpdater.downloadApk(context, apkUrl, expectedSha256) }
                 tryInstall(file)
+            } catch (e: ApkUpdater.NotNewerException) {
+                // Не предлагать эту же версию снова (иначе цикл «скачал — поставил — снова
+                // предлагает»); появится следующий релиз — диалог покажется для него.
+                onSkip()
+                state = DownloadState.Error("${e.message}. Предложение скрыто до следующего релиза.")
             } catch (e: Exception) {
                 state = DownloadState.Error(e.message ?: "неизвестная ошибка")
             }
